@@ -7,7 +7,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import StepIndicator from '../components/SurveyForm/StepIndicator';
 import DynamicField from '../components/FormBuilder/DynamicField';
-import { Save, ChevronLeft, ChevronRight, CheckCircle, Info, Clock, Loader2 } from 'lucide-react';
+import { Save, ChevronLeft, ChevronRight, CheckCircle, Info, Clock, Loader2, MapPin } from 'lucide-react';
 
 const NewVisit = () => {
     const [currentStep, setCurrentStep] = useState(0);
@@ -21,6 +21,53 @@ const NewVisit = () => {
     const [searchParams] = useSearchParams();
     const timerRef = useRef(null);
     const { user } = useAuth(); // Import useAuth to get role
+    const [exactLocation, setExactLocation] = useState(null);
+    const [fetchingLocation, setFetchingLocation] = useState(false);
+    const [locationError, setLocationError] = useState(null);
+    const [coords, setCoords] = useState({ lat: null, lon: null });
+
+    const fetchExactLocation = () => {
+        if (!navigator.geolocation) {
+            setLocationError('Geolocation not supported by your browser');
+            return;
+        }
+
+        setFetchingLocation(true);
+        setLocationError(null);
+
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                const { latitude, longitude } = position.coords;
+                try {
+                    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+                    const data = await response.json();
+                    
+                    if (data && data.display_name) {
+                        setExactLocation(data.display_name);
+                        setCoords({ lat: latitude, lon: longitude });
+                    } else {
+                        setLocationError('Could not translate coordinates to an address');
+                    }
+                } catch (err) {
+                    setLocationError('Failed to fetch address from OpenStreetMap');
+                } finally {
+                    setFetchingLocation(false);
+                }
+            },
+            (error) => {
+                setLocationError('Location permission denied / unavailable');
+                setFetchingLocation(false);
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+    };
+
+    // Auto-fetch location on load if not editing an existing report
+    useEffect(() => {
+        if (!id && user) {
+            fetchExactLocation();
+        }
+    }, [id, user]);
 
     const urlFormType = searchParams.get('formType');
 
@@ -128,6 +175,12 @@ const NewVisit = () => {
                         visit.meta.meetingEnd = new Date(visit.meta.meetingEnd).toISOString().slice(0, 16);
                     }
 
+                    if (visit.exactLocation) {
+                        setExactLocation(visit.exactLocation);
+                    }
+                    if (visit.lat && visit.lon) {
+                        setCoords({ lat: visit.lat, lon: visit.lon });
+                    }
                     reset(visit);
                 } catch (err) {
                     console.error('Failed to fetch visit data:', err);
@@ -158,7 +211,7 @@ const NewVisit = () => {
         }
         setSaveStatus('Saving draft...');
         try {
-            const payload = { ...formData, status: 'draft', formVersion: config?.version, formType: config?.formType };
+            const payload = { ...formData, exactLocation, lat: coords.lat, lon: coords.lon, status: 'draft', formVersion: config?.version, formType: config?.formType };
             if (visitId) {
                 await api.put(`/visits/${visitId}`, payload);
             } else {
@@ -174,7 +227,7 @@ const NewVisit = () => {
     const onSubmit = async (data) => {
         setIsSaving(true);
         try {
-            const payload = { ...data, status: 'submitted', formVersion: config?.version, formType: config?.formType };
+            const payload = { ...data, exactLocation, lat: coords.lat, lon: coords.lon, status: 'submitted', formVersion: config?.version, formType: config?.formType };
             if (visitId) {
                 await api.put(`/visits/${visitId}`, payload);
             } else {
@@ -234,9 +287,24 @@ const NewVisit = () => {
                         {id ? 'Edit ' : 'New '} 
                         {(config?.formType === 'home_visit' || urlFormType === 'home_visit') ? 'Home Visit Report' : 'Visit Report'}
                     </h1>
-                    <div className="flex items-center gap-2 mt-1 text-slate-500 text-xs sm:text-sm">
-                        <Clock className="w-3 h-3 text-kanan-blue" />
-                        <span>{saveStatus}</span>
+                    <div className="flex flex-wrap items-center gap-3 mt-2">
+                        <div className="flex items-center gap-1.5 text-slate-500 text-xs sm:text-sm bg-slate-100 px-2 py-1 rounded-md">
+                            <Clock className="w-3.5 h-3.5 text-kanan-blue" />
+                            <span>{saveStatus}</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-1.5 text-xs sm:text-sm bg-kanan-blue/5 text-kanan-navy px-3 py-1 rounded-md border border-kanan-blue/10 max-w-md">
+                            <MapPin className="w-3.5 h-3.5 shrink-0 text-kanan-blue" />
+                            {fetchingLocation ? (
+                                <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin text-kanan-blue"/> Identifying location...</span>
+                            ) : exactLocation ? (
+                                <span className="truncate font-medium text-kanan-navy" title={exactLocation}>{exactLocation}</span>
+                            ) : locationError ? (
+                                <span className="text-red-500 flex items-center gap-2">{locationError} <button type="button" onClick={fetchExactLocation} className="underline font-medium text-red-600">Retry</button></span>
+                            ) : (
+                                <span>Location pending</span>
+                            )}
+                        </div>
                     </div>
                 </div>
                 <button

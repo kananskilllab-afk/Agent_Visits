@@ -28,6 +28,7 @@ import {
     Cell,
     Legend
 } from 'recharts';
+import ActivityMap from '../components/charts/ActivityMap';
 
 const Analytics = () => {
     const { user } = useAuth();
@@ -331,6 +332,18 @@ const Analytics = () => {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {/* Activity Map Section */}
+            <div className="card">
+                <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
+                    <MapIcon className="w-5 h-5 text-kanan-blue" />
+                    Visit Activity Map
+                </h3>
+                <ActivityMap visits={userVisits.length > 0 ? userVisits : performance.flatMap(p => p.recentVisits || [])} />
+                <p className="mt-4 text-xs text-slate-400 italic">
+                    * Showing locations for visits with active GPS tracking.
+                </p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

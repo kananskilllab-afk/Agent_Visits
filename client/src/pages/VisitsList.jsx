@@ -125,9 +125,9 @@ const VisitsList = () => {
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-1.5 text-sm text-slate-600 max-w-xs truncate" title={visit?.studentInfo?.address || visit?.location?.address || visit?.agencyProfile?.address}>
+                                                    <div className="flex items-center gap-1.5 text-sm text-slate-600 max-w-xs truncate" title={visit?.exactLocation || visit?.studentInfo?.address || visit?.location?.address || visit?.agencyProfile?.address}>
                                                         <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
-                                                        <span className="truncate">{visit?.studentInfo?.address || visit?.location?.address || visit?.agencyProfile?.address || '-'}</span>
+                                                        <span className="truncate">{visit?.exactLocation || visit?.studentInfo?.address || visit?.location?.address || visit?.agencyProfile?.address || '-'}</span>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">
@@ -213,7 +213,7 @@ const VisitsList = () => {
                                         </div>
                                         <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 p-2.5 rounded-lg">
                                             <MapPin className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
-                                            <span className="leading-relaxed">{visit?.agencyProfile?.address || 'No address'}</span>
+                                            <span className="leading-relaxed">{visit?.exactLocation || visit?.studentInfo?.address || visit?.agencyProfile?.address || 'No address'}</span>
                                         </div>
                                     </div>
                                 ))
