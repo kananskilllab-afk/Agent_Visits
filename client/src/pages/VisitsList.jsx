@@ -1,27 +1,47 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
-import { FileText, Search, MapPin, Calendar, Building, Trash2, Edit } from 'lucide-react';
+import { FileText, Search, MapPin, Calendar, Building2, Trash2, Edit, PlusCircle, Filter, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+
+const STATUS_CFG = {
+    submitted:       { label: 'Pending Review',  bg: 'bg-orange-50',  text: 'text-brand-orange', dot: 'bg-brand-orange', ring: 'ring-brand-orange/20' },
+    reviewed:        { label: 'Reviewed',          bg: 'bg-blue-50',   text: 'text-brand-sky',    dot: 'bg-brand-sky',    ring: 'ring-brand-sky/20'    },
+    action_required: { label: 'Action Required',  bg: 'bg-red-50',    text: 'text-red-600',       dot: 'bg-red-500',      ring: 'ring-red-400/20'      },
+    closed:          { label: 'Closed',            bg: 'bg-green-50',  text: 'text-brand-green',  dot: 'bg-brand-green',  ring: 'ring-brand-green/20'  },
+    draft:           { label: 'Draft',             bg: 'bg-slate-50',  text: 'text-slate-500',    dot: 'bg-slate-400',    ring: 'ring-slate-200'       },
+};
+
+const StatusBadge = ({ status }) => {
+    const cfg = STATUS_CFG[status] || STATUS_CFG.draft;
+    return (
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${cfg.bg} ${cfg.text} ring-1 ${cfg.ring}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+            {cfg.label}
+        </span>
+    );
+};
 
 const VisitsList = () => {
     const { user } = useAuth();
     const [visits, setVisits] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState('');
     const [visitToDelete, setVisitToDelete] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    
     const urlFormType = searchParams.get('formType');
 
+    const isHomeVisit = urlFormType === 'home_visit' || user.department === 'B2C' || user.role === 'home_visit';
+
     const fetchVisits = async () => {
+        setLoading(true);
         try {
-            // If superadmin/admin specifies a type, filter by it
             const query = urlFormType ? `?formType=${urlFormType}` : '';
             const res = await api.get(`/visits${query}`);
-            setVisits(res.data.data);
+            setVisits(res.data.data || []);
         } catch (err) {
             console.error('Failed to fetch visits', err);
         } finally {
@@ -29,13 +49,10 @@ const VisitsList = () => {
         }
     };
 
-    useEffect(() => {
-        fetchVisits();
-    }, [urlFormType]);
+    useEffect(() => { fetchVisits(); }, [urlFormType]);
 
     const handleDeleteVisit = async () => {
         if (!visitToDelete) return;
-        
         setIsSubmitting(true);
         try {
             await api.delete(`/visits/${visitToDelete._id}`);
@@ -48,207 +65,259 @@ const VisitsList = () => {
         }
     };
 
-    const filteredVisits = visits.filter(visit => 
-        visit?.meta?.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        visit?.studentInfo?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        visit?.agencyProfile?.address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        visit?.location?.address?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const q = searchTerm.toLowerCase();
+    const filteredVisits = visits.filter(visit => {
+        const matchesSearch = !q || (
+            (visit?.meta?.companyName || '').toLowerCase().includes(q) ||
+            (visit?.studentInfo?.name || '').toLowerCase().includes(q) ||
+            (visit?.agencyProfile?.address || '').toLowerCase().includes(q) ||
+            (visit?.location?.address || '').toLowerCase().includes(q) ||
+            (visit?.submittedBy?.name || '').toLowerCase().includes(q)
+        );
+        const matchesStatus = !statusFilter || visit.status === statusFilter;
+        return matchesSearch && matchesStatus;
+    });
+
+    const isAdmin = user.role === 'superadmin' || user.role === 'admin';
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-5 page-enter">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">{(urlFormType === 'home_visit' || user.department === 'B2C' || user.role === 'home_visit') ? 'Home Visits' : 'Visits'}</h1>
-                    <p className="text-slate-500">View and track all your logged {(urlFormType === 'home_visit' || user.department === 'B2C' || user.role === 'home_visit') ? 'Home Visit' : 'Visit'} reports.</p>
+                    <h1 className="page-title">{isHomeVisit ? 'Home Visits' : 'Visit Reports'}</h1>
+                    <p className="page-subtitle">
+                        {filteredVisits.length} of {visits.length} {isHomeVisit ? 'home visits' : 'visit reports'}
+                    </p>
                 </div>
-            </div>
-
-            <div className="card shadow-sm border-slate-200 p-0 overflow-hidden">
-                <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-center gap-4 bg-slate-50/50">
-                    <div className="relative w-full">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                        <input
-                            type="text"
-                            placeholder="Search visits..."
-                            className="input-field pl-10 h-11 bg-white"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                </div>
-
-                {loading ? (
-                    <div className="p-8 text-center text-slate-500">Loading your visits...</div>
-                ) : (
-                    <>
-                        {/* Desktop Table View */}
-                        <div className="hidden md:block overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                                        <th className="px-6 py-4">{(urlFormType === 'home_visit' || user.department === 'B2C' || user.role === 'home_visit') ? 'Home Visit Details' : 'Visit Details'}</th>
-                                        <th className="px-6 py-4">Status</th>
-                                        <th className="px-6 py-4">Location</th>
-                                        <th className="px-6 py-4">Date</th>
-                                        <th className="px-6 py-4 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {filteredVisits.length === 0 ? (
-                                        <tr>
-                                            <td colSpan="5" className="text-center py-8 text-slate-500">No visits found.</td>
-                                        </tr>
-                                    ) : (
-                                        filteredVisits.map((visit) => (
-                                            <tr key={visit._id} className="hover:bg-slate-50/50 transition-colors">
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-xl bg-kanan-blue/10 text-kanan-blue flex items-center justify-center font-bold shrink-0">
-                                                            <Building className="w-5 h-5" />
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-bold text-slate-900 truncate">
-                                                                {visit?.studentInfo?.name || visit?.meta?.companyName || 'Unknown'}
-                                                            </p>
-                                                            <p className="text-xs text-slate-500 truncate">By: {visit?.submittedBy?.name || user.name}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-sm ${
-                                                        visit.status === 'submitted' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                                        visit.status === 'closed' ? 'bg-green-50 text-green-700 border-green-200' :
-                                                        'bg-slate-50 text-slate-600 border-slate-200'
-                                                    }`}>
-                                                        {visit.status}
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-1.5 text-sm text-slate-600 max-w-xs truncate" title={visit?.exactLocation || visit?.studentInfo?.address || visit?.location?.address || visit?.agencyProfile?.address}>
-                                                        <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
-                                                        <span className="truncate">{visit?.exactLocation || visit?.studentInfo?.address || visit?.location?.address || visit?.agencyProfile?.address || '-'}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
-                                                        <Calendar className="w-4 h-4 text-slate-400" />
-                                                        {new Date(visit.createdAt).toLocaleDateString()}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        {(user.role === 'superadmin' || user.role === 'admin' || visit.submittedBy?._id === user._id) && (
-                                                            <button 
-                                                                title="Edit Visit"
-                                                                onClick={() => navigate(`/edit-visit/${visit._id}`)}
-                                                                className="p-1.5 rounded-lg border border-kanan-blue/20 text-kanan-blue hover:bg-kanan-blue/5 transition-all"
-                                                            >
-                                                                <Edit className="w-4 h-4" />
-                                                            </button>
-                                                        )}
-                                                        {(user.role === 'superadmin' || visit.submittedBy?._id === user._id) && (
-                                                            <button 
-                                                                title="Delete Visit"
-                                                                onClick={() => setVisitToDelete(visit)}
-                                                                className="p-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-all"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Mobile Card View */}
-                        <div className="md:hidden divide-y divide-slate-100">
-                            {filteredVisits.length === 0 ? (
-                                <div className="p-8 text-center text-slate-500">No visits found.</div>
-                            ) : (
-                                filteredVisits.map((visit) => (
-                                    <div key={visit._id} className="p-4 space-y-4">
-                                        <div className="flex items-start justify-between gap-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-xl bg-kanan-blue/10 text-kanan-blue flex items-center justify-center font-bold shrink-0">
-                                                    <Building className="w-5 h-5" />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-bold text-slate-900 truncate">{visit?.meta?.companyName || 'Unknown Company'}</p>
-                                                    <div className="flex items-center gap-2 mt-0.5">
-                                                        <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase border ${
-                                                            visit.status === 'submitted' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                                            'bg-slate-50 text-slate-600 border-slate-200'
-                                                        }`}>
-                                                            {visit.status}
-                                                        </span>
-                                                        <span className="text-[10px] text-slate-400">
-                                                            {new Date(visit.createdAt).toLocaleDateString()}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                {(user.role === 'superadmin' || user.role === 'admin' || visit.submittedBy?._id === user._id) && (
-                                                    <button 
-                                                        onClick={() => navigate(`/edit-visit/${visit._id}`)}
-                                                        className="p-2 rounded-lg border border-kanan-blue/10 bg-kanan-blue/5 text-kanan-blue"
-                                                    >
-                                                        <Edit className="w-4 h-4" />
-                                                    </button>
-                                                )}
-                                                {(user.role === 'superadmin' || visit.submittedBy?._id === user._id) && (
-                                                    <button 
-                                                        onClick={() => setVisitToDelete(visit)}
-                                                        className="p-2 rounded-lg border border-red-100 bg-red-50 text-red-600"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 p-2.5 rounded-lg">
-                                            <MapPin className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
-                                            <span className="leading-relaxed">{visit?.exactLocation || visit?.studentInfo?.address || visit?.agencyProfile?.address || 'No address'}</span>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </>
+                {(user.role === 'user' || user.role === 'home_visit') && (
+                    <button
+                        onClick={() => navigate('/new-visit')}
+                        className="btn-primary shrink-0 flex items-center gap-2"
+                    >
+                        <PlusCircle className="w-4 h-4" />
+                        New Report
+                    </button>
                 )}
             </div>
 
-            {/* Confirm Delete Modal */}
+            {/* Search + Filter Bar */}
+            <div className="card p-3 sm:p-4">
+                <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder={`Search ${isHomeVisit ? 'student, address' : 'company, agent, address'}...`}
+                            className="input-field pl-10 h-10"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                        {searchTerm && (
+                            <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                <X className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+                        <select
+                            className="input-field h-10 w-44 text-sm"
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                        >
+                            <option value="">All Statuses</option>
+                            <option value="draft">Draft</option>
+                            <option value="submitted">Pending Review</option>
+                            <option value="reviewed">Reviewed</option>
+                            <option value="action_required">Action Required</option>
+                            <option value="closed">Closed</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            {/* Content */}
+            {loading ? (
+                <div className="card p-8 space-y-3 animate-pulse">
+                    {[1,2,3,4,5].map(i => (
+                        <div key={i} className="h-16 bg-slate-100 rounded-xl" />
+                    ))}
+                </div>
+            ) : filteredVisits.length === 0 ? (
+                <div className="card flex flex-col items-center justify-center py-16 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                        <FileText className="w-8 h-8 text-slate-300" />
+                    </div>
+                    <p className="font-bold text-slate-600 text-lg">No visits found</p>
+                    <p className="text-sm text-slate-400 mt-1">
+                        {searchTerm || statusFilter ? 'Try adjusting your filters' : 'Start by creating a new visit report'}
+                    </p>
+                    {!searchTerm && !statusFilter && (user.role === 'user' || user.role === 'home_visit') && (
+                        <button onClick={() => navigate('/new-visit')} className="btn-primary mt-5">
+                            Create First Report
+                        </button>
+                    )}
+                </div>
+            ) : (
+                <>
+                    {/* Desktop Table */}
+                    <div className="hidden md:block card p-0 overflow-hidden">
+                        <table className="w-full text-left">
+                            <thead>
+                                <tr className="border-b border-slate-100">
+                                    <th className="th">{isHomeVisit ? 'Student / Visit' : 'Company / Agent'}</th>
+                                    <th className="th">Status</th>
+                                    <th className="th">Location</th>
+                                    <th className="th">Date</th>
+                                    <th className="th text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {filteredVisits.map((visit) => (
+                                    <tr
+                                        key={visit._id}
+                                        onClick={() => navigate(`/edit-visit/${visit._id}`)}
+                                        className="hover:bg-blue-50/30 cursor-pointer transition-colors group"
+                                    >
+                                        <td className="td">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center font-bold shrink-0 group-hover:bg-brand-blue/20 transition-colors">
+                                                    <Building2 className="w-4 h-4" />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-bold text-slate-800 truncate group-hover:text-brand-blue transition-colors">
+                                                        {visit?.studentInfo?.name || visit?.meta?.companyName || 'Untitled'}
+                                                    </p>
+                                                    <p className="text-xs text-slate-400 truncate mt-0.5">
+                                                        By: {visit?.submittedBy?.name || user.name}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="td">
+                                            <StatusBadge status={visit.status} />
+                                        </td>
+                                        <td className="td">
+                                            <div className="flex items-center gap-1.5 text-xs text-slate-500 max-w-[200px]">
+                                                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                <span className="truncate">
+                                                    {visit?.gpsLocation?.substring(0, 30) || visit?.location?.city || visit?.agencyProfile?.address?.substring(0, 30) || '—'}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="td">
+                                            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                                                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                                {new Date(visit.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                            </div>
+                                        </td>
+                                        <td className="td text-right" onClick={(e) => e.stopPropagation()}>
+                                            <div className="flex justify-end gap-1.5">
+                                                {(isAdmin || visit.submittedBy?._id === user._id) && (
+                                                    <button
+                                                        onClick={() => navigate(`/edit-visit/${visit._id}`)}
+                                                        className="p-1.5 rounded-lg border border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5 transition-all"
+                                                        title="Edit"
+                                                    >
+                                                        <Edit className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
+                                                {(user.role === 'superadmin' || visit.submittedBy?._id === user._id) && (
+                                                    <button
+                                                        onClick={() => setVisitToDelete(visit)}
+                                                        className="p-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-all"
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Mobile Cards */}
+                    <div className="md:hidden space-y-3">
+                        {filteredVisits.map((visit) => (
+                            <div
+                                key={visit._id}
+                                onClick={() => navigate(`/edit-visit/${visit._id}`)}
+                                className="card hover:border-brand-sky/30 hover:shadow-card-lg cursor-pointer transition-all"
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                                        <div className="w-10 h-10 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0">
+                                            <Building2 className="w-5 h-5" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-bold text-slate-800 truncate">
+                                                {visit?.studentInfo?.name || visit?.meta?.companyName || 'Untitled'}
+                                            </p>
+                                            <p className="text-xs text-slate-400 mt-0.5">
+                                                {new Date(visit.createdAt).toLocaleDateString()}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                        {(isAdmin || visit.submittedBy?._id === user._id) && (
+                                            <button
+                                                onClick={() => navigate(`/edit-visit/${visit._id}`)}
+                                                className="p-2 rounded-lg border border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5"
+                                            >
+                                                <Edit className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                        {(user.role === 'superadmin' || visit.submittedBy?._id === user._id) && (
+                                            <button
+                                                onClick={() => setVisitToDelete(visit)}
+                                                className="p-2 rounded-lg border border-red-200 text-red-500 hover:bg-red-50"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
+                                    <StatusBadge status={visit.status} />
+                                    <div className="flex items-center gap-1 text-xs text-slate-400">
+                                        <MapPin className="w-3 h-3" />
+                                        <span className="truncate max-w-[140px]">
+                                            {visit?.gpsLocation?.substring(0, 25) || visit?.location?.city || visit?.agencyProfile?.address?.substring(0, 25) || 'No location'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+
+            {/* Delete Modal */}
             {visitToDelete && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl animate-in zoom-in duration-200 overflow-hidden">
+                    <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-fade-in">
                         <div className="p-6 text-center">
-                            <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                                <Trash2 className="w-8 h-8 text-red-600" />
+                            <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                                <Trash2 className="w-7 h-7 text-red-600" />
                             </div>
-                            <h3 className="text-xl font-bold text-slate-800 mb-2">Delete Visit Form?</h3>
-                            <p className="text-slate-500 text-sm">
-                                Are you sure you want to permanently delete the visit for <strong className="text-slate-800">{visitToDelete.meta?.companyName || 'this company'}</strong>? This action cannot be undone.
+                            <h3 className="text-lg font-bold text-slate-800 mb-2">Delete Visit?</h3>
+                            <p className="text-sm text-slate-500">
+                                Permanently delete <strong className="text-slate-800">{visitToDelete.meta?.companyName || visitToDelete.studentInfo?.name || 'this visit'}</strong>? This cannot be undone.
                             </p>
                         </div>
                         <div className="p-4 bg-slate-50 flex gap-3">
-                            <button
-                                onClick={() => setVisitToDelete(null)}
-                                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 font-bold text-slate-600 hover:bg-white transition-all"
-                            >
-                                Cancel
-                            </button>
+                            <button onClick={() => setVisitToDelete(null)} className="flex-1 btn-outline py-2.5">Cancel</button>
                             <button
                                 onClick={handleDeleteVisit}
                                 disabled={isSubmitting}
-                                className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 disabled:opacity-50 transition-all"
                             >
-                                {isSubmitting ? 'Deleting...' : 'Delete Visit'}
+                                {isSubmitting ? 'Deleting...' : 'Delete'}
                             </button>
                         </div>
                     </div>

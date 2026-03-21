@@ -1,37 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  background-color: #f8fafc;
+  --bg-page: #F4F6FB;
+  --color-navy: #393185;
+  --color-blue: #284695;
+  --color-sky: #00A0E3;
 }
 
 @layer base {
+  * {
+    box-sizing: border-box;
+  }
   body {
-    @apply text-slate-800 antialiased font-sans;
+    @apply antialiased text-slate-800;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-page);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
   }
 }
 
 @layer components {
+  /* ── Buttons ─────────────────────────────────────────────── */
   .btn-primary {
-    @apply px-4 py-2 bg-kanan-navy text-white rounded-md hover:bg-opacity-90 transition-all font-medium disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-brand-blue text-white rounded-xl font-semibold text-sm
+           hover:bg-brand-navy active:scale-[0.98] transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
   }
   .btn-secondary {
-    @apply px-4 py-2 bg-kanan-blue text-white rounded-md hover:bg-opacity-90 transition-all font-medium;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-brand-sky text-white rounded-xl font-semibold text-sm
+           hover:opacity-90 active:scale-[0.98] transition-all duration-150 shadow-sm;
   }
-  .input-field {
-    @apply w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-kanan-blue focus:border-transparent transition-all;
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-slate-600 rounded-xl font-medium text-sm
+           hover:bg-slate-100 active:scale-[0.98] transition-all duration-150;
   }
-  .card {
-    @apply bg-white rounded-3xl shadow-sm border border-slate-200 p-6;
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-xl font-medium text-sm
+           hover:bg-slate-50 active:scale-[0.98] transition-all duration-150 bg-white;
   }
 
-  /* Custom Utilities */
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
+  /* ── Form Inputs ─────────────────────────────────────────── */
+  .input-field {
+    @apply w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-white
+           focus:outline-none focus:ring-2 focus:ring-brand-sky/30 focus:border-brand-sky
+           transition-all duration-150 text-sm text-slate-800 placeholder:text-slate-400;
   }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+  .input-field:disabled {
+    @apply bg-slate-50 cursor-not-allowed opacity-70;
   }
+  .label {
+    @apply block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5;
+  }
+
+  /* ── Cards ────────────────────────────────────────────────── */
+  .card {
+    @apply bg-white rounded-3xl shadow-card-premium border border-slate-100/60 p-5 sm:p-8;
+  }
+  .card-hover {
+    @apply card hover:shadow-card-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer;
+  }
+
+  /* ── Sidebar ──────────────────────────────────────────────── */
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium
+           text-white/65 hover:text-white hover:bg-white/10
+           transition-all duration-150 relative;
+  }
+  .sidebar-link.active {
+    @apply bg-white/15 text-white;
+  }
+  .sidebar-link.active::before {
+    content: '';
+    @apply absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 bg-brand-gold rounded-r-full;
+  }
+
+  /* ── Status Badges ────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider;
+  }
+  .badge-draft        { @apply badge bg-slate-100 text-slate-600; }
+  .badge-submitted    { @apply badge bg-orange-100 text-orange-700; }
+  .badge-reviewed     { @apply badge bg-blue-100 text-blue-700; }
+  .badge-action       { @apply badge bg-red-100 text-red-700; }
+  .badge-closed       { @apply badge bg-green-100 text-green-800; }
+
+  /* ── Misc ─────────────────────────────────────────────────── */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  .page-title {
+    @apply text-2xl font-extrabold text-slate-900 tracking-tight;
+  }
+  .page-subtitle {
+    @apply text-sm text-slate-500 mt-0.5;
+  }
+
+  .divider { @apply border-t border-slate-100; }
+
+  /* ── Table ────────────────────────────────────────────────── */
+  .th { @apply px-5 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-left; }
+  .td { @apply px-5 py-4 text-sm text-slate-700; }
+
+  /* Smooth page transitions */
+  .page-enter {
+    animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .glass {
+    @apply bg-white/70 backdrop-blur-md border border-white/20;
+  }
+
+  .shadow-premium {
+    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.04), 0 4px 12px -2px rgba(0, 0, 0, 0.02);
+  }
+
+  .shadow-card-premium {
+    box-shadow: 0 4px 20px -2px rgba(57, 49, 133, 0.06), 0 1px 3px -1px rgba(0, 0, 0, 0.03);
+  }
+}
+
+/* ── Keyframes ─────────────────────────────────────────── */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Recharts overrides */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-radius: 12px !important;
+  border: none !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.10) !important;
 }

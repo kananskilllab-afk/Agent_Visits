@@ -45,7 +45,25 @@ async function run() {
             { id: 'studentInfo.email', group: 'Student Information', label: 'Email ID', type: 'text', required: true },
             { id: 'contactDetails.indiaNo', group: 'Contact Details', label: 'India No.', type: 'text', required: true },
             { id: 'location.address', group: 'Location Details', label: 'Address', type: 'textarea', required: true },
-            { id: 'outcome.status', group: 'Final Outcome', label: 'Visit Outcome / Status', type: 'dropdown', required: true, options: ['Pending', 'Completed', 'Follow-up Needed', 'Cancelled'] },
+            { id: 'outcome.status', group: 'Final Outcome', label: 'Visit Outcome / Status', type: 'dropdown', required: true, options: [
+                'Pending', 
+                'Completed', 
+                'Cancelled',
+                'HOUSE LOCKED',
+                'ADDRESS NOT FOUND',
+                'VISIT DONE',
+                'REVISIT REQUIRED',
+                'ENROLLED',
+                'NOT INTRESTED',
+                'OUT OF VADODARAA',
+                'IN PROGRESS',
+                'WRONG ADDRESS DETAILS',
+                'NOT RESPONDING',
+                'HO INVITE',
+                'FOLLOW UP REQUIRED',
+                'SHIFTED OTHER CITY',
+                'NOT FOUND'
+            ] },
             { id: 'outcome.remarks', group: 'Final Outcome', label: 'Remarks / Notes', type: 'textarea', required: true }
         ];
 

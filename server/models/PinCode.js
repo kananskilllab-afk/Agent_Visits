@@ -17,6 +17,10 @@ const pinCodeSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    state: {
+        type: String,
+        trim: true
+    },
     region: {
         type: String,
         trim: true
@@ -28,5 +32,9 @@ const pinCodeSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+// code already indexed via unique: true above
+pinCodeSchema.index({ city: 1 });
+pinCodeSchema.index({ isActive: 1 });
 
 module.exports = mongoose.model('PinCode', pinCodeSchema);

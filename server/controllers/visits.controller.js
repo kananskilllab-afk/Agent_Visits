@@ -12,8 +12,13 @@ exports.getVisits = async (req, res) => {
         }
 
         // Additional filters from query params
-        const { status, companyName, startDate, endDate, city, formType } = req.query;
+        const { status, companyName, startDate, endDate, city, formType, submittedBy } = req.query;
         if (status) query.status = status;
+
+        // Admin/superadmin can filter by specific user
+        if (submittedBy && (req.user.role === 'admin' || req.user.role === 'superadmin')) {
+            query.submittedBy = submittedBy;
+        }
         
         if (companyName) {
             query.$or = [
@@ -46,7 +51,8 @@ exports.getVisits = async (req, res) => {
             if (!query.$or) query.$or = [];
             query.$or.push(
                 { 'agencyProfile.address': { $regex: city, $options: 'i' } },
-                { 'studentInfo.address': { $regex: city, $options: 'i' } }
+                { 'location.city': { $regex: city, $options: 'i' } },
+                { 'location.address': { $regex: city, $options: 'i' } }
             );
         }
 
@@ -107,43 +113,49 @@ exports.updateVisit = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Visit not found' });
         }
 
-        // Admin can always update status and notes
-        if (req.user.role !== 'user' && req.user.role !== 'home_visit') {
-            // If it's just an admin adding a note or changing status
-            if (req.body.status) visit.status = req.body.status;
-            if (req.body.adminNote) {
-                visit.adminNotes.push({
-                    note: req.body.adminNote,
-                    addedBy: req.user._id
-                });
-            }
-            await visit.save();
-            return res.json({ success: true, data: visit });
-        }
+        // Check permission
+        const isOwner = visit.submittedBy.toString() === req.user._id.toString();
+        const isAdmin = req.user.role === 'admin' || req.user.role === 'superadmin';
 
-        // User constraints
-        if (visit.submittedBy.toString() !== req.user._id.toString()) {
+        if (!isOwner && !isAdmin) {
             return res.status(403).json({ success: false, message: 'Not authorized to update this visit' });
         }
 
-        // 24-hour edit lock check (if not draft)
-        if (visit.status !== 'draft') {
+        // 24-hour edit lock check for NON-admins (if not draft)
+        if (!isAdmin && visit.status !== 'draft') {
             const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
             if (visit.updatedAt < twentyFourHoursAgo) {
                 return res.status(403).json({ success: false, message: 'Edit window (24h) has expired' });
             }
         }
 
+        // Prepare update data
+        let updateData = { ...req.body };
+
+        // Handle Admin-specific notes
+        if (isAdmin && req.body.adminNote) {
+            updateData.$push = {
+                adminNotes: {
+                    note: req.body.adminNote,
+                    addedBy: req.user._id
+                }
+            };
+            delete updateData.adminNote;
+        }
+
         // Record history
         const historyEntry = {
             editedAt: new Date(),
             editedBy: req.user._id,
-            changesSummary: 'Update survey details'
+            changesSummary: isAdmin ? 'Admin correction' : 'Update survey details'
         };
+
+        if (!updateData.$push) updateData.$push = {};
+        updateData.$push.editHistory = historyEntry;
 
         const updatedVisit = await Visit.findByIdAndUpdate(
             req.params.id,
-            { ...req.body, $push: { editHistory: historyEntry } },
+            updateData,
             { new: true, runValidators: true }
         );
 

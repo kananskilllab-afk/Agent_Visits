@@ -11,12 +11,9 @@ import FormBuilder from './pages/FormBuilder';
 import Profile from './pages/Profile';
 
 const ProtectedRoute = ({ children, roles }) => {
-    const { user, loading } = useAuth();
-
-    if (loading) return <div>Loading...</div>;
-    if (!user) return <Navigate to="/login" />;
-    if (roles && !roles.includes(user.role)) return <Navigate to="/" />;
-
+    const { user } = useAuth();
+    if (!user) return <Navigate to="/login" replace />;
+    if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
     return children;
 };
 
@@ -45,7 +42,6 @@ function App() {
                             <Analytics />
                         </ProtectedRoute>
                     } />
-                    {/* Add more routes here */}
                     <Route path="users" element={
                         <ProtectedRoute roles={['superadmin']}>
                             <UserManagement />
@@ -57,6 +53,8 @@ function App() {
                         </ProtectedRoute>
                     } />
                 </Route>
+
+                <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
         </Router>
     );

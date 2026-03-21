@@ -1,120 +1,194 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import {
-    Users,
-    TrendingUp,
-    PieChart as PieChartIcon,
-    ArrowUpRight,
-    ArrowDownRight,
-    Search,
-    Download,
-    Filter,
-    Calendar as CalendarIcon,
-    RefreshCcw,
-    MapPin as MapIcon,
-    Briefcase
+    Users, BarChart2, PieChart as PieChartIcon,
+    Search, Filter, RefreshCcw, MapPin, Briefcase,
+    Calendar as CalendarIcon, Clock, Target, Award,
+    ChevronDown, ChevronUp, X, Star, Activity, Globe,
+    FileText, CheckCircle2, AlertCircle, Loader2,
+    AlertTriangle, CheckCheck, Eye
 } from 'lucide-react';
 import {
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer,
-    PieChart,
-    Pie,
-    Cell,
-    Legend
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+    ResponsiveContainer, PieChart, Pie, Cell, Legend,
+    AreaChart, Area
 } from 'recharts';
 import ActivityMap from '../components/charts/ActivityMap';
+
+// ── Brand colors ──────────────────────────────────────────────────────────────
+const COLORS = ['#284695', '#00A0E3', '#009846', '#E19D19', '#EF7F1A', '#9C2BE3', '#B0CB1F', '#393185'];
+const STATUS_COLORS = {
+    submitted: '#EF7F1A',
+    reviewed: '#00A0E3',
+    action_required: '#DC2626',
+    closed: '#009846',
+    draft: '#94A3B8'
+};
+const STATUS_LABELS = {
+    submitted: 'Pending Review',
+    reviewed: 'Reviewed',
+    action_required: 'Action Required',
+    closed: 'Closed',
+    draft: 'Draft'
+};
+
+const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    return (
+        <div className="bg-white rounded-xl shadow-card-lg border border-slate-100 p-3 text-sm">
+            <p className="font-bold text-slate-700 mb-1">{label}</p>
+            {payload.map((p, i) => (
+                <p key={i} style={{ color: p.color || p.fill }} className="font-semibold">
+                    {p.name}: {p.value}
+                </p>
+            ))}
+        </div>
+    );
+};
+
+const StatCard = ({ title, value, icon: Icon, color, bgColor, sub }) => (
+    <div className="card hover:shadow-card-lg transition-all group">
+        <div className="flex items-start justify-between">
+            <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{title}</p>
+                <p className="text-3xl font-extrabold mt-1.5 tracking-tight" style={{ color }}>{value ?? '—'}</p>
+                {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
+            </div>
+            <div className="p-2.5 rounded-xl group-hover:scale-110 transition-transform" style={{ backgroundColor: bgColor }}>
+                <Icon className="w-5 h-5" style={{ color }} />
+            </div>
+        </div>
+    </div>
+);
+
+const ChartCard = ({ title, subtitle, icon: Icon, iconColor = '#284695', children, className = '', action }) => (
+    <div className={`card ${className}`}>
+        <div className="flex items-center justify-between gap-2 mb-5">
+            <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl" style={{ backgroundColor: iconColor + '15' }}>
+                    <Icon className="w-4 h-4" style={{ color: iconColor }} />
+                </div>
+                <div>
+                    <h3 className="font-bold text-slate-800 text-sm">{title}</h3>
+                    {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
+                </div>
+            </div>
+            {action}
+        </div>
+        {children}
+    </div>
+);
+
+const StatusPill = ({ status }) => {
+    const cfg = {
+        submitted:       { bg: 'bg-orange-50',  text: 'text-brand-orange' },
+        reviewed:        { bg: 'bg-blue-50',    text: 'text-brand-sky' },
+        action_required: { bg: 'bg-red-50',     text: 'text-red-600' },
+        closed:          { bg: 'bg-green-50',   text: 'text-brand-green' },
+        draft:           { bg: 'bg-slate-100',  text: 'text-slate-500' },
+    }[status] || { bg: 'bg-slate-100', text: 'text-slate-500' };
+    return (
+        <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wide ${cfg.bg} ${cfg.text}`}>
+            {STATUS_LABELS[status] || status}
+        </span>
+    );
+};
 
 const Analytics = () => {
     const { user } = useAuth();
     const [summary, setSummary] = useState(null);
     const [performance, setPerformance] = useState([]);
+    const [detailed, setDetailed] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedUser, setSelectedUser] = useState(null);
     const [userVisits, setUserVisits] = useState([]);
     const [isFetchingUser, setIsFetchingUser] = useState(false);
+    const [mapVisits, setMapVisits] = useState([]);
+    const [pendingVisits, setPendingVisits] = useState([]);
+    const [updatingVisitId, setUpdatingVisitId] = useState(null);
+    const [noteVisit, setNoteVisit] = useState(null);
+    const [noteText, setNoteText] = useState('');
+    const [toast, setToast] = useState(null);
     const [pincodes, setPincodes] = useState([]);
-    
-    // Filters State
+    const [showFilters, setShowFilters] = useState(false);
+
     const [filters, setFilters] = useState({
-        pinCode: '',
-        bdmName: '',
-        rmName: '',
-        status: '',
-        city: '',
-        startDate: '',
-        endDate: '',
+        pinCode: '', bdmName: '', rmName: '', status: '',
+        city: '', startDate: '', endDate: '',
         reportType: user.role === 'admin' && user.department ? user.department : ''
     });
 
-    const handleFilterChange = (name, value) => {
-        setFilters(prev => ({ ...prev, [name]: value }));
-    };
+    const activeFilterCount = Object.values(filters).filter(Boolean).length;
+    const handleFilterChange = (name, value) => setFilters(prev => ({ ...prev, [name]: value }));
+    const resetFilters = () => setFilters({ pinCode: '', bdmName: '', rmName: '', status: '', city: '', startDate: '', endDate: '', reportType: '' });
 
-    const resetFilters = () => {
-        setFilters({
-            pinCode: '',
-            bdmName: '',
-            rmName: '',
-            status: '',
-            city: '',
-            startDate: '',
-            endDate: '',
-            reportType: ''
-        });
+    const showToast = (msg, type = 'success') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
     };
 
     useEffect(() => {
-        const fetchBaseData = async () => {
-            try {
-                const pincodeRes = await api.get('/pincodes');
-                setPincodes(pincodeRes.data.data);
-            } catch (err) {
-                console.error('Error fetching pincodes:', err);
-            }
-        };
-        fetchBaseData();
+        api.get('/pincodes').then(res => setPincodes(res.data.data || [])).catch(() => {});
     }, []);
 
+    // Fetch all visits for the map (admin sees all)
     useEffect(() => {
-        const fetchAnalytics = async () => {
-            setLoading(true);
-            try {
-                const params = new URLSearchParams();
-                Object.entries(filters).forEach(([key, value]) => {
-                    if (value) params.append(key, value);
-                });
-                const queryString = params.toString() ? `?${params.toString()}` : '';
-                
-                const [summaryRes, performanceRes] = await Promise.all([
-                    api.get(`/analytics/summary${queryString}`),
-                    api.get(`/analytics/performance${queryString}`)
-                ]);
-                setSummary(summaryRes.data.data);
-                setPerformance(performanceRes.data.data);
-            } catch (err) {
-                console.error('Error fetching analytics:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchAnalytics();
+        api.get('/visits').then(res => setMapVisits(res.data.data || [])).catch(() => {});
+    }, []);
+
+    // Fetch pending/action-required visits for admin action panel
+    const fetchPendingVisits = useCallback(async () => {
+        try {
+            const [subRes, actRes] = await Promise.all([
+                api.get('/visits?status=submitted'),
+                api.get('/visits?status=action_required')
+            ]);
+            const combined = [...(subRes.data.data || []), ...(actRes.data.data || [])];
+            combined.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            setPendingVisits(combined);
+        } catch (err) {
+            console.error('Failed to fetch pending visits', err);
+        }
+    }, []);
+
+    useEffect(() => { fetchPendingVisits(); }, [fetchPendingVisits]);
+
+    const fetchAnalytics = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const params = new URLSearchParams();
+            Object.entries(filters).forEach(([k, v]) => { if (v) params.append(k, v); });
+            const qs = params.toString() ? `?${params.toString()}` : '';
+
+            const [sumRes, perfRes, detRes] = await Promise.all([
+                api.get(`/analytics/summary${qs}`),
+                api.get(`/analytics/performance${qs}`),
+                api.get(`/analytics/detailed${qs}`)
+            ]);
+            setSummary(sumRes.data.data);
+            setPerformance(perfRes.data.data || []);
+            setDetailed(detRes.data.data);
+        } catch (err) {
+            console.error('Analytics fetch error', err);
+            setError(err.response?.data?.message || 'Failed to load analytics. Please try again.');
+        } finally {
+            setLoading(false);
+        }
     }, [filters]);
+
+    useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
 
     const fetchUserSpecificData = async (userId) => {
         setIsFetchingUser(true);
+        setUserVisits([]);
         try {
-            // We'll use the visits endpoint with a filter to get recent visits for this user
             const res = await api.get(`/visits?submittedBy=${userId}`);
-            setUserVisits(res.data.data);
-            const userPerf = performance.find(p => p._id === userId);
-            setSelectedUser(userPerf);
+            setUserVisits(res.data.data || []);
+            setSelectedUser(performance.find(p => p._id === userId));
         } catch (err) {
             console.error('Error fetching user data:', err);
         } finally {
@@ -122,333 +196,609 @@ const Analytics = () => {
         }
     };
 
-    const filteredPerformance = performance.filter(p => 
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.employeeId.toLowerCase().includes(searchTerm.toLowerCase())
+    const handleStatusUpdate = async (visitId, newStatus) => {
+        setUpdatingVisitId(visitId);
+        try {
+            await api.put(`/visits/${visitId}`, { status: newStatus });
+            showToast(`Visit marked as ${STATUS_LABELS[newStatus]}`);
+            fetchPendingVisits();
+            fetchAnalytics();
+        } catch (err) {
+            showToast(err.response?.data?.message || 'Update failed', 'error');
+        } finally {
+            setUpdatingVisitId(null);
+        }
+    };
+
+    const handleAddNote = async () => {
+        if (!noteText.trim() || !noteVisit) return;
+        setUpdatingVisitId(noteVisit._id);
+        try {
+            await api.put(`/visits/${noteVisit._id}`, { adminNote: noteText });
+            showToast('Note added successfully');
+            setNoteVisit(null);
+            setNoteText('');
+        } catch (err) {
+            showToast(err.response?.data?.message || 'Failed to add note', 'error');
+        } finally {
+            setUpdatingVisitId(null);
+        }
+    };
+
+    const sq = searchTerm.toLowerCase();
+    const filteredPerformance = !sq ? performance : performance.filter(p =>
+        (p.name || '').toLowerCase().includes(sq) ||
+        (p.employeeId || '').toLowerCase().includes(sq)
+    );
+
+    // Error state
+    if (error) return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
+            <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mb-4">
+                <AlertTriangle className="w-8 h-8 text-red-500" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Failed to load analytics</h2>
+            <p className="text-sm text-slate-500 max-w-xs mb-5">{error}</p>
+            <button onClick={fetchAnalytics} className="btn-primary flex items-center gap-2">
+                <RefreshCcw className="w-4 h-4" />
+                Retry
+            </button>
+        </div>
     );
 
     if (loading) return (
-        <div className="space-y-8 animate-pulse">
-            <div className="h-10 w-48 bg-slate-200 rounded-lg"></div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {[1, 2, 3].map(i => <div key={i} className="h-32 bg-slate-200 rounded-xl"></div>)}
+        <div className="space-y-6 animate-pulse">
+            <div className="h-10 w-56 bg-slate-200 rounded-xl" />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[1,2,3,4].map(i => <div key={i} className="h-28 bg-slate-200 rounded-2xl" />)}
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="h-[400px] bg-slate-200 rounded-xl"></div>
-                <div className="h-[400px] bg-slate-200 rounded-xl"></div>
+                {[1,2,3,4].map(i => <div key={i} className="h-64 bg-slate-200 rounded-2xl" />)}
             </div>
         </div>
     );
 
-    const statusColors = {
-        'submitted': '#2E75B6',
-        'closed': '#10B981',
-        'action_required': '#EF4444',
-        'draft': '#94A3B8',
-        'reviewed': '#1A3C6E'
-    };
-
-    const pieData = summary?.statusDist.map(item => ({
-        name: item._id.charAt(0).toUpperCase() + item._id.slice(1).replace('_', ' '),
+    const pieData = (summary?.statusDist || []).map(item => ({
+        name: STATUS_LABELS[item._id] || item._id,
         value: item.count,
-        color: statusColors[item._id] || '#cbd5e1'
-    })) || [];
+        color: STATUS_COLORS[item._id] || '#CBD5E1'
+    }));
+
+    const formTypeData = (summary?.formTypeDist || []).map(item => ({
+        name: item._id === 'generic' ? 'B2B Agency' : 'B2C Home Visit',
+        value: item.count,
+        color: item._id === 'generic' ? '#284695' : '#E19D19'
+    }));
+
+    const dailyData = (summary?.dailyTrends || []).map(t => ({
+        date: t._id.slice(5),
+        visits: t.count
+    }));
+
+    const funnelData = (detailed?.funnelData || []).map(f => ({
+        stage: STATUS_LABELS[f.stage] || f.stage,
+        count: f.count,
+        color: STATUS_COLORS[f.stage]
+    }));
+
+    const topUsers = performance.slice(0, 5);
+    const activeVisitsForMap = userVisits.length > 0 ? userVisits : mapVisits;
 
     return (
-        <div className="space-y-8 pb-12">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-800">Advanced Analytics</h1>
-                    <p className="text-slate-500">Comprehensive overview of activity and performance.</p>
+        <div className="space-y-6 pb-12 page-enter">
+
+            {/* Toast notification */}
+            {toast && (
+                <div className={`fixed top-4 right-4 z-[200] px-4 py-3 rounded-xl shadow-lg font-semibold text-sm flex items-center gap-2 animate-fade-in ${
+                    toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-brand-green text-white'
+                }`}>
+                    {toast.type === 'error'
+                        ? <AlertCircle className="w-4 h-4" />
+                        : <CheckCircle2 className="w-4 h-4" />
+                    }
+                    {toast.msg}
                 </div>
-                <div className="flex items-center gap-3">
-                    <button 
-                        onClick={resetFilters}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-600 font-bold hover:bg-slate-50 transition-all shadow-sm"
+            )}
+
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h1 className="page-title">Analytics & Insights</h1>
+                    <p className="page-subtitle">Comprehensive data overview for informed decisions</p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={fetchAnalytics}
+                        className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-brand-blue hover:border-brand-sky transition-all"
+                        title="Refresh data"
                     >
                         <RefreshCcw className="w-4 h-4" />
-                        Reset
                     </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-kanan-navy text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-md">
-                        <Download className="w-4 h-4" />
-                        Export
+                    <button
+                        onClick={() => setShowFilters(v => !v)}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm border transition-all ${
+                            showFilters || activeFilterCount > 0
+                                ? 'bg-brand-blue text-white border-brand-blue shadow-md shadow-brand-blue/20'
+                                : 'bg-white text-slate-600 border-slate-200 hover:border-brand-sky'
+                        }`}
+                    >
+                        <Filter className="w-4 h-4" />
+                        Filters
+                        {activeFilterCount > 0 && (
+                            <span className="bg-white/30 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
+                                {activeFilterCount}
+                            </span>
+                        )}
+                        {showFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
-                </div>
-            </div>
-
-            {/* Filter Section */}
-            <div className="card border-none bg-slate-50/50 p-6">
-                <div className="flex items-center gap-2 mb-4 text-slate-700 font-bold">
-                    <Filter className="w-5 h-5 text-kanan-blue" />
-                    Analytics Filters
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {/* BDM Search */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <Users className="w-3 h-3" /> BDM Name
-                        </label>
-                        <input 
-                            type="text"
-                            placeholder="Search BDM..."
-                            className="input-field h-10 text-sm"
-                            value={filters.bdmName}
-                            onChange={(e) => handleFilterChange('bdmName', e.target.value)}
-                        />
-                    </div>
-                    {/* RM Search */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <Briefcase className="w-3 h-3" /> RM Name
-                        </label>
-                        <input 
-                            type="text"
-                            placeholder="Search RM..."
-                            className="input-field h-10 text-sm"
-                            value={filters.rmName}
-                            onChange={(e) => handleFilterChange('rmName', e.target.value)}
-                        />
-                    </div>
-                    {/* Status Filter */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <RefreshCcw className="w-3 h-3" /> Status
-                        </label>
-                        <select 
-                            className="input-field h-10 text-sm"
-                            value={filters.status}
-                            onChange={(e) => handleFilterChange('status', e.target.value)}
+                    {activeFilterCount > 0 && (
+                        <button
+                            onClick={resetFilters}
+                            className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-bold text-slate-500 hover:text-red-500 bg-white border border-slate-200 rounded-xl transition-all"
                         >
-                            <option value="">All Statuses</option>
-                            <option value="draft">Draft</option>
-                            <option value="submitted">Submitted</option>
-                            <option value="action_required">Action Required</option>
-                            <option value="closed">Closed</option>
-                        </select>
-                    </div>
-                    {/* Pincode Filter */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <MapIcon className="w-3 h-3" /> Pincode
-                        </label>
-                        <select 
-                            value={filters.pinCode}
-                            onChange={(e) => handleFilterChange('pinCode', e.target.value)}
-                            className="input-field h-10 text-sm"
-                        >
-                            <option value="">All Pincodes</option>
-                            {pincodes.map(pc => (
-                                <option key={pc._id} value={pc.code}>{pc.code} - {pc.city}</option>
-                            ))}
-                        </select>
-                    </div>
-                    {/* Date Range Start */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <CalendarIcon className="w-3 h-3" /> Date From
-                        </label>
-                        <input 
-                            type="date"
-                            className="input-field h-10 text-sm"
-                            value={filters.startDate}
-                            onChange={(e) => handleFilterChange('startDate', e.target.value)}
-                        />
-                    </div>
-                    {/* Date Range End */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <CalendarIcon className="w-3 h-3" /> Date To
-                        </label>
-                        <input 
-                            type="date"
-                            className="input-field h-10 text-sm"
-                            value={filters.endDate}
-                            onChange={(e) => handleFilterChange('endDate', e.target.value)}
-                        />
-                    </div>
-                    {/* Report Type Filter */}
-                    <div className="space-y-1.5 lg:col-span-1">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <PieChartIcon className="w-3 h-3" /> Report Type
-                        </label>
-                        <select 
-                            className="input-field h-10 text-sm"
-                            value={filters.reportType}
-                            onChange={(e) => handleFilterChange('reportType', e.target.value)}
-                        >
-                            {(user.role === 'superadmin' || !user.department) && <option value="">All Reports</option>}
-                            {(user.role === 'superadmin' || user.department === 'B2B') && <option value="B2B">B2B (Agency)</option>}
-                            {(user.role === 'superadmin' || user.department === 'B2C') && <option value="B2C">Home Visit</option>}
-                        </select>
-                    </div>
-                    {/* City/Location */}
-                    <div className="space-y-1.5 lg:col-span-1">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <Search className="w-3 h-3" /> Specific Location/City
-                        </label>
-                        <input 
-                            type="text"
-                            placeholder="Enter city or address keywords..."
-                            className="input-field h-10 text-sm"
-                            value={filters.city}
-                            onChange={(e) => handleFilterChange('city', e.target.value)}
-                        />
-                    </div>
+                            <X className="w-3.5 h-3.5" />
+                            Clear
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {/* Top Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="card border-l-4 border-l-kanan-navy">
-                    <div className="flex justify-between items-start">
+            {/* Filters Panel */}
+            {showFilters && (
+                <div className="card animate-fade-in">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div>
-                            <p className="text-sm font-medium text-slate-500 mb-1">Total Submission Volume</p>
-                            <h3 className="text-3xl font-bold text-slate-900">{summary?.stats.totalVisits}</h3>
+                            <label className="label"><Users className="w-3 h-3 inline mr-1" />BDM Name</label>
+                            <input type="text" placeholder="Search BDM..." className="input-field h-9 text-sm"
+                                value={filters.bdmName} onChange={(e) => handleFilterChange('bdmName', e.target.value)} />
                         </div>
-                        <div className="p-2 bg-slate-100 rounded-lg text-kanan-navy">
-                            <TrendingUp className="w-5 h-5" />
+                        <div>
+                            <label className="label"><Briefcase className="w-3 h-3 inline mr-1" />RM Name</label>
+                            <input type="text" placeholder="Search RM..." className="input-field h-9 text-sm"
+                                value={filters.rmName} onChange={(e) => handleFilterChange('rmName', e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="label">Status</label>
+                            <select className="input-field h-9 text-sm" value={filters.status}
+                                onChange={(e) => handleFilterChange('status', e.target.value)}>
+                                <option value="">All Statuses</option>
+                                <option value="draft">Draft</option>
+                                <option value="submitted">Pending Review</option>
+                                <option value="reviewed">Reviewed</option>
+                                <option value="action_required">Action Required</option>
+                                <option value="closed">Closed</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="label"><MapPin className="w-3 h-3 inline mr-1" />Pincode</label>
+                            <select className="input-field h-9 text-sm" value={filters.pinCode}
+                                onChange={(e) => handleFilterChange('pinCode', e.target.value)}>
+                                <option value="">All Pincodes</option>
+                                {pincodes.map(pc => <option key={pc._id} value={pc.code}>{pc.code} – {pc.city}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="label"><CalendarIcon className="w-3 h-3 inline mr-1" />Date From</label>
+                            <input type="date" className="input-field h-9 text-sm" value={filters.startDate}
+                                onChange={(e) => handleFilterChange('startDate', e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="label"><CalendarIcon className="w-3 h-3 inline mr-1" />Date To</label>
+                            <input type="date" className="input-field h-9 text-sm" value={filters.endDate}
+                                onChange={(e) => handleFilterChange('endDate', e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="label">Report Type</label>
+                            <select className="input-field h-9 text-sm" value={filters.reportType}
+                                onChange={(e) => handleFilterChange('reportType', e.target.value)}>
+                                {user.role === 'superadmin' && <option value="">All Reports</option>}
+                                {(user.role === 'superadmin' || user.department === 'B2B') && <option value="B2B">B2B Agency</option>}
+                                {(user.role === 'superadmin' || user.department === 'B2C') && <option value="B2C">Home Visit</option>}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="label"><Search className="w-3 h-3 inline mr-1" />City / Location</label>
+                            <input type="text" placeholder="City or address..." className="input-field h-9 text-sm"
+                                value={filters.city} onChange={(e) => handleFilterChange('city', e.target.value)} />
                         </div>
                     </div>
                 </div>
-                <div className="card border-l-4 border-l-kanan-blue">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-sm font-medium text-slate-500 mb-1">Active Surveyors</p>
-                            <h3 className="text-3xl font-bold text-slate-900">{performance.length}</h3>
-                        </div>
-                        <div className="p-2 bg-slate-100 rounded-lg text-kanan-blue">
-                            <Users className="w-5 h-5" />
-                        </div>
-                    </div>
-                </div>
-                <div className="card border-l-4 border-l-amber-500">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-sm font-medium text-slate-500 mb-1">Pending Processing</p>
-                            <h3 className="text-3xl font-bold text-slate-900">{summary?.stats.pendingReview}</h3>
-                        </div>
-                        <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
-                            <Search className="w-5 h-5" />
-                        </div>
-                    </div>
-                </div>
+            )}
+
+            {/* KPI Summary */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard title="Total Visits"      value={summary?.stats.totalVisits}    icon={FileText}     color="#284695" bgColor="#EEF4FF" />
+                <StatCard title="Pending Review"    value={summary?.stats.pendingReview}  icon={Clock}        color="#EF7F1A" bgColor="#FFF4EA" />
+                <StatCard title="Action Required"   value={summary?.stats.actionRequired} icon={AlertCircle}  color="#DC2626" bgColor="#FEF2F2" />
+                <StatCard title="Closed / Resolved" value={summary?.stats.closedVisits}   icon={CheckCircle2} color="#009846" bgColor="#ECFDF5"
+                    sub={summary?.stats.totalVisits ? `${Math.round((summary.stats.closedVisits / summary.stats.totalVisits) * 100)}% closure rate` : undefined}
+                />
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard title="Reviewed"         value={summary?.stats.reviewedVisits} icon={Award}    color="#00A0E3" bgColor="#E0F5FF" />
+                <StatCard title="Drafts"           value={summary?.stats.draftVisits}    icon={FileText} color="#94A3B8" bgColor="#F8FAFC" />
+                <StatCard title="Active Users"     value={summary?.stats.activeUsers}    icon={Users}    color="#9C2BE3" bgColor="#F5EDFF" />
+                <StatCard title="Avg Infra Rating" icon={Star} color="#E19D19" bgColor="#FFF8E6"
+                    value={detailed?.avgInfraRating > 0 ? `${detailed.avgInfraRating} / 5` : '—'}
+                />
             </div>
 
-            {/* Activity Map Section */}
-            <div className="card">
-                <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                    <MapIcon className="w-5 h-5 text-kanan-blue" />
-                    Visit Activity Map
-                </h3>
-                <ActivityMap visits={userVisits.length > 0 ? userVisits : performance.flatMap(p => p.recentVisits || [])} />
-                <p className="mt-4 text-xs text-slate-400 italic">
-                    * Showing locations for visits with active GPS tracking.
-                </p>
-            </div>
+            {/* Pending Actions Panel */}
+            {pendingVisits.length > 0 && (
+                <ChartCard
+                    title="Pending Actions"
+                    subtitle={`${pendingVisits.length} visit${pendingVisits.length !== 1 ? 's' : ''} require attention`}
+                    icon={AlertCircle}
+                    iconColor="#DC2626"
+                    action={
+                        <span className="px-2.5 py-1 bg-red-50 text-red-600 text-xs font-extrabold rounded-full">
+                            {pendingVisits.length} pending
+                        </span>
+                    }
+                >
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                        {pendingVisits.map(visit => (
+                            <div key={visit._id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3.5 rounded-xl border border-slate-100 hover:bg-slate-50 transition-all">
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="text-sm font-bold text-slate-800 truncate">
+                                            {visit.meta?.companyName || visit.studentInfo?.name || 'Untitled'}
+                                        </p>
+                                        <StatusPill status={visit.status} />
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                        By: {visit.submittedBy?.name || '—'} · {new Date(visit.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                                    {visit.status !== 'reviewed' && (
+                                        <button
+                                            onClick={() => handleStatusUpdate(visit._id, 'reviewed')}
+                                            disabled={updatingVisitId === visit._id}
+                                            className="px-3 py-1.5 bg-blue-50 text-brand-sky rounded-lg text-xs font-bold hover:bg-blue-100 transition-all disabled:opacity-50 flex items-center gap-1"
+                                        >
+                                            <Eye className="w-3 h-3" />
+                                            Reviewed
+                                        </button>
+                                    )}
+                                    {visit.status !== 'action_required' && (
+                                        <button
+                                            onClick={() => handleStatusUpdate(visit._id, 'action_required')}
+                                            disabled={updatingVisitId === visit._id}
+                                            className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-all disabled:opacity-50 flex items-center gap-1"
+                                        >
+                                            <AlertCircle className="w-3 h-3" />
+                                            Action Needed
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => handleStatusUpdate(visit._id, 'closed')}
+                                        disabled={updatingVisitId === visit._id}
+                                        className="px-3 py-1.5 bg-green-50 text-brand-green rounded-lg text-xs font-bold hover:bg-green-100 transition-all disabled:opacity-50 flex items-center gap-1"
+                                    >
+                                        {updatingVisitId === visit._id
+                                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                                            : <CheckCheck className="w-3 h-3" />
+                                        }
+                                        Close
+                                    </button>
+                                    <button
+                                        onClick={() => { setNoteVisit(visit); setNoteText(''); }}
+                                        className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-200 transition-all"
+                                    >
+                                        Add Note
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </ChartCard>
+            )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Status Distribution */}
-                <div className="card">
-                    <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <PieChartIcon className="w-5 h-5 text-kanan-blue" />
-                        Visit Status Distribution
-                    </h3>
-                    <div className="h-[300px]">
+            {/* Daily Activity + Status Pie */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <ChartCard
+                    title="Daily Activity (Last 30 Days)"
+                    subtitle="Submissions per day"
+                    icon={Activity}
+                    iconColor="#00A0E3"
+                    className="lg:col-span-2"
+                >
+                    <div className="h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={dailyData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="dailyGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#00A0E3" stopOpacity={0.15} />
+                                        <stop offset="95%" stopColor="#00A0E3" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={4} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} />
+                                <Tooltip content={CustomTooltip} />
+                                <Area type="monotone" dataKey="visits" name="Visits" stroke="#00A0E3" strokeWidth={2.5} fill="url(#dailyGrad)" dot={false} activeDot={{ r: 4, fill: '#284695' }} isAnimationActive={false} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                </ChartCard>
+
+                <ChartCard title="Status Distribution" subtitle="By submission status" icon={PieChartIcon} iconColor="#9C2BE3">
+                    <div className="h-56">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
-                                <Pie
-                                    data={pieData}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                >
-                                    {pieData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
+                                <Pie data={pieData} cx="50%" cy="45%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value" isAnimationActive={false}>
+                                    {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                                 </Pie>
-                                <Tooltip 
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Legend verticalAlign="bottom" height={36}/>
+                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }} />
+                                <Legend formatter={(value) => value} iconSize={8} wrapperStyle={{ fontSize: '11px', fontWeight: 600, color: '#475569' }} />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
-                </div>
+                </ChartCard>
+            </div>
 
-                {/* Performance Chart */}
-                <div className="card">
-                    <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <ArrowUpRight className="w-5 h-5 text-emerald-500" />
-                        Top Performing Surveyors (Visits)
-                    </h3>
-                    <div className="h-[300px]">
+            {/* Day of Week + Funnel */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ChartCard title="Visits by Day of Week" subtitle="Peak submission days" icon={CalendarIcon} iconColor="#E19D19">
+                    <div className="h-56">
                         <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={performance.slice(0, 5)} layout="vertical">
-                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                                <XAxis type="number" axisLine={false} tickLine={false} />
-                                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 600 }} width={100} />
-                                <Tooltip 
-                                    cursor={{fill: '#f8fafc'}}
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="visitsCount" fill="#2E75B6" radius={[0, 4, 4, 0]} barSize={20} />
+                            <BarChart data={detailed?.dayOfWeekData || []} margin={{ left: -20 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }} />
+                                <Tooltip content={CustomTooltip} />
+                                <Bar dataKey="count" name="Visits" fill="#E19D19" radius={[6, 6, 0, 0]} barSize={32} isAnimationActive={false} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
-                </div>
+                </ChartCard>
+
+                <ChartCard title="Submission Funnel" subtitle="Visit lifecycle progression" icon={Target} iconColor="#009846">
+                    <div className="h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={funnelData} layout="vertical" margin={{ left: 10, right: 15 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F1F5F9" />
+                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} />
+                                <YAxis dataKey="stage" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11, fontWeight: 600 }} width={110} />
+                                <Tooltip content={CustomTooltip} />
+                                <Bar dataKey="count" name="Count" radius={[0, 6, 6, 0]} barSize={22} isAnimationActive={false}>
+                                    {funnelData.map((entry, i) => <Cell key={i} fill={entry.color || COLORS[i % COLORS.length]} />)}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </ChartCard>
             </div>
+
+            {/* Form Type + Top Pincodes */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ChartCard title="Form Type Distribution" subtitle="B2B vs B2C breakdown" icon={BarChart2} iconColor="#284695">
+                    <div className="space-y-3">
+                        {formTypeData.map((item) => {
+                            const pct = summary?.stats.totalVisits
+                                ? Math.round((item.value / summary.stats.totalVisits) * 100) : 0;
+                            return (
+                                <div key={item.name}>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                        <span className="text-sm font-semibold text-slate-700">{item.name}</span>
+                                        <span className="text-sm font-bold" style={{ color: item.color }}>
+                                            {item.value} <span className="text-slate-400 font-normal">({pct}%)</span>
+                                        </span>
+                                    </div>
+                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: item.color }} />
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {formTypeData.length === 0 && <p className="text-sm text-slate-400 text-center py-8">No data available</p>}
+                    </div>
+                </ChartCard>
+
+                <ChartCard title="Top Pincodes" subtitle="Most visited area codes" icon={MapPin} iconColor="#EF7F1A">
+                    <div className="space-y-2">
+                        {(detailed?.topPincodes || []).slice(0, 6).map((pc, i) => (
+                            <div key={pc._id} className="flex items-center gap-3">
+                                <span className="text-xs font-extrabold text-slate-400 w-5 shrink-0">{i + 1}</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-sm font-bold text-slate-700">{pc._id}</span>
+                                        <span className="text-xs font-bold text-brand-orange">{pc.count} visits</span>
+                                    </div>
+                                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-brand-orange rounded-full"
+                                            style={{ width: `${(pc.count / ((detailed?.topPincodes[0]?.count) || 1)) * 100}%` }} />
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        {!detailed?.topPincodes?.length && <p className="text-sm text-slate-400 text-center py-8">No pincode data available</p>}
+                    </div>
+                </ChartCard>
+            </div>
+
+            {/* B2B: Business Models + Countries */}
+            {(detailed?.businessModels?.length > 0 || detailed?.countriesPromoted?.length > 0) && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {detailed?.businessModels?.length > 0 && (
+                        <ChartCard title="Business Models (B2B)" subtitle="Agency business model distribution" icon={Briefcase} iconColor="#284695">
+                            <div className="h-56">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={detailed.businessModels.slice(0, 8)} layout="vertical" margin={{ left: 10, right: 15 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F1F5F9" />
+                                        <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} />
+                                        <YAxis dataKey="_id" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10, fontWeight: 600 }} width={100} />
+                                        <Tooltip content={CustomTooltip} />
+                                        <Bar dataKey="count" name="Agencies" fill="#284695" radius={[0, 6, 6, 0]} barSize={18} isAnimationActive={false} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </ChartCard>
+                    )}
+                    {detailed?.countriesPromoted?.length > 0 && (
+                        <ChartCard title="Countries Promoted (B2B)" subtitle="Top destination countries being marketed" icon={Globe} iconColor="#009846">
+                            <div className="h-56">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={detailed.countriesPromoted.slice(0, 8)} layout="vertical" margin={{ left: 10, right: 15 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F1F5F9" />
+                                        <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} />
+                                        <YAxis dataKey="_id" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10, fontWeight: 600 }} width={90} />
+                                        <Tooltip content={CustomTooltip} />
+                                        <Bar dataKey="count" name="Count" fill="#009846" radius={[0, 6, 6, 0]} barSize={18} isAnimationActive={false} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </ChartCard>
+                    )}
+                </div>
+            )}
+
+            {/* B2C Visit Outcomes */}
+            {detailed?.visitOutcomes?.length > 0 && (
+                <ChartCard title="B2C Visit Outcomes" subtitle="Results from home visits" icon={CheckCircle2} iconColor="#009846">
+                    <div className="flex flex-wrap gap-4">
+                        {detailed.visitOutcomes.map((item, i) => (
+                            <div key={item._id} className="flex-1 min-w-[120px] p-4 rounded-xl border border-slate-100 text-center">
+                                <p className="text-2xl font-extrabold" style={{ color: COLORS[i % COLORS.length] }}>{item.count}</p>
+                                <p className="text-xs font-semibold text-slate-500 mt-1 capitalize">{item._id || 'Unknown'}</p>
+                            </div>
+                        ))}
+                    </div>
+                </ChartCard>
+            )}
+
+            {/* Activity Map */}
+            <ChartCard
+                title="Visit Activity Map"
+                subtitle={selectedUser
+                    ? `Filtered: ${userVisits.length} visits by ${selectedUser.name}`
+                    : `${activeVisitsForMap.filter(v => v.gpsCoordinates?.lat || v.lat).length} visits with GPS data`
+                }
+                icon={MapPin}
+                iconColor="#00A0E3"
+                action={selectedUser && (
+                    <button
+                        onClick={() => { setSelectedUser(null); setUserVisits([]); }}
+                        className="text-xs font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-all"
+                    >
+                        <X className="w-3 h-3" /> Clear filter
+                    </button>
+                )}
+            >
+                <ActivityMap visits={activeVisitsForMap} />
+                {!selectedUser && (
+                    <p className="mt-3 text-xs text-slate-400 italic">
+                        Click "View" on an agent below to filter the map to their visits.
+                    </p>
+                )}
+            </ChartCard>
+
+            {/* Top Performers Chart */}
+            <ChartCard title="Top Performers" subtitle="Agents by total visit submissions" icon={Award} iconColor="#E19D19">
+                <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={topUsers} layout="vertical" margin={{ left: 10, right: 30 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F1F5F9" />
+                            <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }} />
+                            <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11, fontWeight: 600 }} width={110} />
+                            <Tooltip content={CustomTooltip} />
+                            <Bar dataKey="visitsCount" name="Total Visits" fill="#E19D19" radius={[0, 6, 6, 0]} barSize={22} isAnimationActive={false} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            </ChartCard>
 
             {/* Performance Table */}
             <div className="card p-0 overflow-hidden">
-                <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <h3 className="font-bold text-slate-800">Surveyor Performance Ranking</h3>
-                    <div className="relative w-full sm:w-64">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                        <input 
-                            type="text" 
-                            placeholder="Search surveyor..." 
-                            className="input-field pl-10 h-10"
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                        <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                            <Users className="w-4 h-4 text-brand-blue" />
+                            Surveyor Performance Rankings
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">{filteredPerformance.length} agents</p>
+                    </div>
+                    <div className="relative w-full sm:w-60">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder="Search agent..."
+                            className="input-field pl-9 h-9 text-sm"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
                 </div>
-                <div className="overflow-x-auto">
+                {/* Performance Rankings: Desktop Table */}
+                <div className="hidden sm:block overflow-x-auto">
                     <table className="w-full text-left">
                         <thead>
-                            <tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
-                                <th className="px-6 py-4">Surveyor Name</th>
-                                <th className="px-6 py-4 text-center">Employee ID</th>
-                                <th className="px-6 py-4 text-center">Total Visits</th>
-                                <th className="px-6 py-4 text-center shrink-0">Actions</th>
+                            <tr className="border-b border-slate-100">
+                                <th className="th">#</th>
+                                <th className="th">Agent</th>
+                                <th className="th text-center">Employee ID</th>
+                                <th className="th text-center">Total</th>
+                                <th className="th text-center">Submitted</th>
+                                <th className="th text-center">Closed</th>
+                                <th className="th text-center">Last Visit</th>
+                                <th className="th text-center">Details</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-slate-50">
                             {filteredPerformance.map((item, index) => (
-                                <tr key={item._id} className="hover:bg-slate-50/50 transition-colors">
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-kanan-navy">
-                                                {index + 1}
-                                            </div>
-                                            <span className="font-bold text-slate-800">{item.name}</span>
+                                <tr key={item._id} className="hover:bg-blue-50/20 transition-colors">
+                                    <td className="td">
+                                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-extrabold ${
+                                            index === 0 ? 'bg-brand-gold/20 text-brand-gold' :
+                                            index === 1 ? 'bg-slate-200 text-slate-600' :
+                                            index === 2 ? 'bg-brand-orange/20 text-brand-orange' :
+                                            'bg-slate-100 text-slate-500'
+                                        }`}>
+                                            {index + 1}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-center text-sm text-slate-500 font-mono">{item.employeeId}</td>
-                                    <td className="px-6 py-4 text-center">
-                                        <span className="px-3 py-1 bg-kanan-light text-kanan-blue rounded-full font-bold text-xs ring-1 ring-kanan-blue/10">
-                                            {item.visitsCount}
-                                        </span>
+                                    <td className="td">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center text-xs font-bold">
+                                                {item.name?.charAt(0)?.toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-bold text-slate-800">{item.name}</p>
+                                                {item.department && <p className="text-[10px] text-slate-400">{item.department}</p>}
+                                            </div>
+                                        </div>
                                     </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <button 
+                                    <td className="td text-center">
+                                        <code className="text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{item.employeeId}</code>
+                                    </td>
+                                    <td className="td text-center">
+                                        <span className="text-sm font-extrabold text-brand-blue">{item.visitsCount}</span>
+                                    </td>
+                                    <td className="td text-center">
+                                        <span className="text-xs font-bold text-brand-orange">{item.submittedCount}</span>
+                                    </td>
+                                    <td className="td text-center">
+                                        <span className="text-xs font-bold text-brand-green">{item.closedCount}</span>
+                                    </td>
+                                    <td className="td text-center text-xs text-slate-400">
+                                        {item.lastSubmission
+                                            ? new Date(item.lastSubmission).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                                            : '—'}
+                                    </td>
+                                    <td className="td text-center">
+                                        <button
                                             onClick={() => fetchUserSpecificData(item._id)}
-                                            className="px-3 py-1.5 bg-kanan-blue/5 text-kanan-blue rounded-lg font-bold text-xs hover:bg-kanan-blue/10 transition-all"
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                                selectedUser?._id === item._id
+                                                    ? 'bg-brand-blue text-white'
+                                                    : 'bg-brand-blue/5 text-brand-blue hover:bg-brand-blue/10'
+                                            }`}
                                         >
-                                            View Details
+                                            {isFetchingUser && selectedUser?._id === item._id
+                                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                : 'View'
+                                            }
                                         </button>
                                     </td>
                                 </tr>
@@ -456,77 +806,159 @@ const Analytics = () => {
                         </tbody>
                     </table>
                 </div>
+
+                {/* Performance Rankings: Mobile Cards */}
+                <div className="sm:hidden space-y-3 p-4">
+                    {filteredPerformance.map((item, index) => (
+                        <div key={item._id} className="p-4 rounded-2xl border border-slate-100 hover:border-brand-sky/20 transition-all bg-white shadow-sm">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${
+                                        index === 0 ? 'bg-brand-gold text-white shadow-md' :
+                                        index === 1 ? 'bg-slate-300 text-slate-700' :
+                                        index === 2 ? 'bg-brand-orange text-white' :
+                                        'bg-slate-100 text-slate-500'
+                                    }`}>
+                                        {index + 1}
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-800">{item.name}</p>
+                                        <p className="text-[10px] text-slate-400 font-mono tracking-tight uppercase">ID: {item.employeeId}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => fetchUserSpecificData(item._id)}
+                                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                        selectedUser?._id === item._id
+                                            ? 'bg-brand-blue text-white'
+                                            : 'bg-brand-blue/10 text-brand-blue'
+                                    }`}
+                                >
+                                    {isFetchingUser && selectedUser?._id === item._id ? '...' : 'View'}
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 py-3 border-t border-slate-50">
+                                <div className="text-center">
+                                    <p className="text-xs text-slate-400 font-bold uppercase tracking-tighter mb-0.5">Visits</p>
+                                    <p className="text-sm font-black text-brand-blue">{item.visitsCount}</p>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-slate-400 font-bold uppercase tracking-tighter mb-0.5">Pend.</p>
+                                    <p className="text-sm font-black text-brand-orange">{item.submittedCount}</p>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-slate-400 font-bold uppercase tracking-tighter mb-0.5">Closed</p>
+                                    <p className="text-sm font-black text-brand-green">{item.closedCount}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                {filteredPerformance.length === 0 && (
+                    <div className="py-12 text-center text-slate-400 text-sm">No agents found</div>
+                )}
             </div>
-            {/* User Details Modal */}
+
+            {/* User Detail Modal */}
             {selectedUser && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl animate-in zoom-in duration-200 overflow-hidden max-h-[90vh] flex flex-col">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-full bg-kanan-blue/10 text-kanan-blue flex items-center justify-center font-bold text-lg">
-                                    {selectedUser.name.charAt(0)}
+                    <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl animate-fade-in overflow-hidden max-h-[90vh] flex flex-col">
+                        <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center font-bold text-lg">
+                                    {selectedUser.name?.charAt(0)?.toUpperCase()}
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-bold text-slate-900">{selectedUser.name}</h3>
-                                    <p className="text-sm text-slate-500">Employee ID: {selectedUser.employeeId}</p>
+                                    <h3 className="font-bold text-slate-900">{selectedUser.name}</h3>
+                                    <p className="text-xs text-slate-400">ID: {selectedUser.employeeId} {selectedUser.department && `· ${selectedUser.department}`}</p>
                                 </div>
                             </div>
-                            <button 
-                                onClick={() => setSelectedUser(null)}
-                                className="p-2 hover:bg-slate-100 rounded-lg transition-all"
+                            <button
+                                onClick={() => { setSelectedUser(null); setUserVisits([]); }}
+                                className="p-2 hover:bg-slate-100 rounded-xl transition-all"
                             >
-                                <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
+                                <X className="w-5 h-5 text-slate-400" />
                             </button>
                         </div>
-                        
-                        <div className="p-6 overflow-y-auto flex-1 space-y-6">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="p-4 bg-slate-50 rounded-xl">
-                                    <p className="text-xs text-slate-500 font-bold uppercase mb-1">Total Contributions</p>
-                                    <p className="text-2xl font-bold text-slate-900">{selectedUser.visitsCount} Visits</p>
-                                </div>
-                                <div className="p-4 bg-emerald-50 rounded-xl">
-                                    <p className="text-xs text-emerald-600 font-bold uppercase mb-1">Status</p>
-                                    <p className="text-2xl font-bold text-emerald-700">Active</p>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h4 className="font-bold text-slate-800 mb-4">Recent Submissions for this User</h4>
-                                {isFetchingUser ? (
-                                    <div className="py-8 text-center text-slate-400 italic">Fetching visit history...</div>
-                                ) : userVisits.length === 0 ? (
-                                    <div className="py-8 text-center text-slate-400">No recent visits found.</div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {userVisits.slice(0, 5).map(visit => (
-                                            <div key={visit._id} className="p-4 rounded-xl border border-slate-100 flex justify-between items-center hover:bg-slate-50 transition-all">
-                                                <div>
-                                                    <p className="font-bold text-slate-900">{visit.meta.companyName}</p>
-                                                    <p className="text-xs text-slate-500">{new Date(visit.createdAt).toLocaleDateString()}</p>
-                                                </div>
-                                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                                                    visit.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
-                                                    visit.status === 'closed' ? 'bg-green-100 text-green-700' :
-                                                    'bg-slate-100 text-slate-600'
-                                                }`}>
-                                                    {visit.status}
-                                                </span>
-                                            </div>
-                                        ))}
+                        <div className="p-5 overflow-y-auto flex-1">
+                            <div className="grid grid-cols-3 gap-3 mb-5">
+                                {[
+                                    { label: 'Total Visits', value: selectedUser.visitsCount, color: '#284695', bg: '#EEF4FF' },
+                                    { label: 'Submitted',    value: selectedUser.submittedCount, color: '#EF7F1A', bg: '#FFF4EA' },
+                                    { label: 'Closed',       value: selectedUser.closedCount, color: '#009846', bg: '#ECFDF5' },
+                                ].map(({ label, value, color, bg }) => (
+                                    <div key={label} className="rounded-xl p-3 text-center" style={{ backgroundColor: bg }}>
+                                        <p className="text-xl font-extrabold" style={{ color }}>{value}</p>
+                                        <p className="text-[10px] font-bold text-slate-500 mt-0.5">{label}</p>
                                     </div>
-                                )}
+                                ))}
                             </div>
+                            <h4 className="font-bold text-slate-700 mb-3 text-sm">Recent Submissions</h4>
+                            {isFetchingUser ? (
+                                <div className="py-8 flex items-center justify-center gap-2 text-slate-400">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Fetching visit history...
+                                </div>
+                            ) : userVisits.length === 0 ? (
+                                <div className="py-8 text-center text-slate-400 text-sm">No visits found</div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {userVisits.slice(0, 8).map(visit => (
+                                        <div key={visit._id} className="p-3.5 rounded-xl border border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-all">
+                                            <div>
+                                                <p className="text-sm font-bold text-slate-800">
+                                                    {visit.meta?.companyName || visit.studentInfo?.name || 'Untitled'}
+                                                </p>
+                                                <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+                                                    <CalendarIcon className="w-3 h-3" />
+                                                    {new Date(visit.createdAt).toLocaleDateString()}
+                                                </p>
+                                            </div>
+                                            <StatusPill status={visit.status} />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
+                        <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0 text-right">
+                            <button onClick={() => { setSelectedUser(null); setUserVisits([]); }} className="btn-ghost px-5">Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
-                        <div className="p-4 bg-slate-50 text-right">
-                            <button 
-                                onClick={() => setSelectedUser(null)}
-                                className="px-6 py-2 bg-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-all"
+            {/* Add Note Modal */}
+            {noteVisit && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl animate-fade-in overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                            <h3 className="font-bold text-slate-900">Add Admin Note</h3>
+                            <button onClick={() => setNoteVisit(null)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
+                                <X className="w-5 h-5 text-slate-400" />
+                            </button>
+                        </div>
+                        <div className="p-5">
+                            <p className="text-sm text-slate-600 mb-3">
+                                Visit: <strong>{noteVisit.meta?.companyName || noteVisit.studentInfo?.name || 'Untitled'}</strong>
+                            </p>
+                            <textarea
+                                rows={4}
+                                placeholder="Enter your note..."
+                                className="input-field text-sm resize-none w-full"
+                                value={noteText}
+                                onChange={(e) => setNoteText(e.target.value)}
+                                autoFocus
+                            />
+                        </div>
+                        <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3">
+                            <button onClick={() => setNoteVisit(null)} className="flex-1 btn-outline py-2.5">Cancel</button>
+                            <button
+                                onClick={handleAddNote}
+                                disabled={!noteText.trim() || updatingVisitId === noteVisit._id}
+                                className="flex-1 btn-primary py-2.5 disabled:opacity-50 flex items-center justify-center gap-2"
                             >
-                                Close Details
+                                {updatingVisitId === noteVisit._id && <Loader2 className="w-4 h-4 animate-spin" />}
+                                Save Note
                             </button>
                         </div>
                     </div>

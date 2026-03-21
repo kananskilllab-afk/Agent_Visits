@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import axios from 'axios';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -7,54 +8,52 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import StepIndicator from '../components/SurveyForm/StepIndicator';
 import DynamicField from '../components/FormBuilder/DynamicField';
-import { Save, ChevronLeft, ChevronRight, CheckCircle, Info, Clock, Loader2, MapPin } from 'lucide-react';
+import { Save, ChevronLeft, ChevronRight, CheckCircle, Info, Clock, Loader2, MapPin, AlertCircle } from 'lucide-react';
 
 const NewVisit = () => {
     const [currentStep, setCurrentStep] = useState(0);
     const [isSaving, setIsSaving] = useState(false);
     const [saveStatus, setSaveStatus] = useState('Drafts are saved automatically');
     const [visitId, setVisitId] = useState(null);
+    const [disabledFields, setDisabledFields] = useState({});
     const [config, setConfig] = useState(null);
     const [loadingConfig, setLoadingConfig] = useState(true);
     const navigate = useNavigate();
     const { id } = useParams();
     const [searchParams] = useSearchParams();
     const timerRef = useRef(null);
-    const { user } = useAuth(); // Import useAuth to get role
-    const [exactLocation, setExactLocation] = useState(null);
+    const { user } = useAuth();
+    const [gpsLocation, setGpsLocation] = useState(null);
     const [fetchingLocation, setFetchingLocation] = useState(false);
     const [locationError, setLocationError] = useState(null);
-    const [coords, setCoords] = useState({ lat: null, lon: null });
+    const [gpsCoords, setGpsCoords] = useState({ lat: null, lng: null });
 
     const fetchExactLocation = () => {
         if (!navigator.geolocation) {
             setLocationError('Geolocation not supported by your browser');
             return;
         }
-
         setFetchingLocation(true);
         setLocationError(null);
-
         navigator.geolocation.getCurrentPosition(
             async (position) => {
                 const { latitude, longitude } = position.coords;
                 try {
                     const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
                     const data = await response.json();
-                    
                     if (data && data.display_name) {
-                        setExactLocation(data.display_name);
-                        setCoords({ lat: latitude, lon: longitude });
+                        setGpsLocation(data.display_name);
+                        setGpsCoords({ lat: latitude, lng: longitude });
                     } else {
-                        setLocationError('Could not translate coordinates to an address');
+                        setLocationError('Could not translate coordinates to address');
                     }
-                } catch (err) {
+                } catch {
                     setLocationError('Failed to fetch address from OpenStreetMap');
                 } finally {
                     setFetchingLocation(false);
                 }
             },
-            (error) => {
+            () => {
                 setLocationError('Location permission denied / unavailable');
                 setFetchingLocation(false);
             },
@@ -62,44 +61,14 @@ const NewVisit = () => {
         );
     };
 
-    // Auto-fetch location on load if not editing an existing report
     useEffect(() => {
-        if (!id && user) {
-            fetchExactLocation();
-        }
+        if (!id && user) fetchExactLocation();
     }, [id, user]);
 
     const urlFormType = searchParams.get('formType');
 
-    // Fetch form configuration
-    useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                // Wait for user to be available
-                if (!user) return;
-                
-                // Determine form type: URL param > Department/Role
-                const formType = urlFormType || ((user.department === 'B2C' || user.role === 'home_visit') ? 'home_visit' : 'generic');
-                
-                const res = await api.get(`/form-config?formType=${formType}`);
-                if (res.data?.success && res.data.data) {
-                    setConfig(res.data.data);
-                } else {
-                    console.warn(`No active ${formType} form configuration found`);
-                }
-            } catch (err) {
-                console.error('Error fetching form config:', err);
-            } finally {
-                setLoadingConfig(false);
-            }
-        };
-        if (user) fetchConfig();
-    }, [user?.role, urlFormType]);
-
-    // Generate dynamic schema based on config
     const schema = useMemo(() => {
         if (!config || !config.fields) return z.object({});
-
         const shape = {};
         config.fields.forEach(field => {
             let fieldSchema;
@@ -121,13 +90,14 @@ const NewVisit = () => {
                     fieldSchema = z.string();
                     if (field.required) fieldSchema = fieldSchema.min(10, `${field.label} must be at least 10 characters`);
                     break;
+                case 'photo-upload':
+                    fieldSchema = z.string().optional().or(z.literal(''));
+                    break;
                 default:
                     fieldSchema = z.string();
                     if (field.required) fieldSchema = fieldSchema.min(1, `${field.label} is required`);
                     else fieldSchema = fieldSchema.optional().or(z.literal(''));
             }
-
-            // Simple flat nesting support (meta.companyName)
             const parts = field.id.split('.');
             if (parts.length > 1) {
                 const [group, key] = parts;
@@ -138,7 +108,20 @@ const NewVisit = () => {
             }
         });
 
-        // Convert the nested objects to z.object
+        // Add special handling for teamMembers array
+        if (!shape.visitInfo) shape.visitInfo = {};
+        shape.visitInfo = {
+            ...shape.visitInfo,
+            teamMembers: z.array(z.string()).optional()
+        };
+
+        // Add special handling for Checklist fields
+        if (!shape.checklist) shape.checklist = {};
+        shape.checklist = {
+            ...shape.checklist,
+            waGroupName: z.string().optional()
+        };
+
         const finalShape = {};
         Object.keys(shape).forEach(key => {
             if (typeof shape[key] === 'object' && !shape[key].safeParse) {
@@ -147,7 +130,6 @@ const NewVisit = () => {
                 finalShape[key] = shape[key];
             }
         });
-
         return z.object(finalShape);
     }, [config]);
 
@@ -157,40 +139,119 @@ const NewVisit = () => {
     });
 
     const formData = watch();
+    const teamSize = parseInt(watch('visitInfo.teamSize') || '1');
+    const pinCodeValue = watch('location.pinCode');
 
-    // Fetch visit data if ID is present
+    // Auto-fill City and State based on PIN Code
     useEffect(() => {
-        if (id && !loadingConfig) {
-            setVisitId(id);
-            const fetchVisitData = async () => {
+        const fetchAddress = async () => {
+            if (pinCodeValue?.length === 6) {
                 try {
-                    const res = await api.get(`/visits/${id}`);
-                    const visit = res.data.data;
-                    
-                    // Format dates for datetime-local input
-                    if (visit.meta?.meetingStart) {
-                        visit.meta.meetingStart = new Date(visit.meta.meetingStart).toISOString().slice(0, 16);
+                    const res = await axios.get(`https://api.postalpincode.in/pincode/${pinCodeValue}`);
+                    if (res.data[0].Status === 'Success') {
+                        const postOffice = res.data[0].PostOffice[0];
+                        setValue('location.city', postOffice.District, { shouldValidate: true });
+                        setValue('location.state', postOffice.State, { shouldValidate: true });
+                        setDisabledFields(prev => ({
+                            ...prev,
+                            'location.city': true,
+                            'location.state': true
+                        }));
                     }
-                    if (visit.meta?.meetingEnd) {
-                        visit.meta.meetingEnd = new Date(visit.meta.meetingEnd).toISOString().slice(0, 16);
-                    }
-
-                    if (visit.exactLocation) {
-                        setExactLocation(visit.exactLocation);
-                    }
-                    if (visit.lat && visit.lon) {
-                        setCoords({ lat: visit.lat, lon: visit.lon });
-                    }
-                    reset(visit);
                 } catch (err) {
-                    console.error('Failed to fetch visit data:', err);
+                    console.error('Error fetching PIN code:', err);
                 }
-            };
-            fetchVisitData();
-        }
-    }, [id, reset, loadingConfig]);
+            } else if (pinCodeValue?.length < 6) {
+                // If user deletes PIN, re-enable fields (optional, but good UX)
+                if (disabledFields['location.city']) {
+                    setDisabledFields(prev => {
+                        const next = { ...prev };
+                        delete next['location.city'];
+                        delete next['location.state'];
+                        return next;
+                    });
+                }
+            }
+        };
+        fetchAddress();
+    }, [pinCodeValue, setValue]);
 
-    // Auto-save logic
+    const waGroupValue = watch('checklist.waGroup');
+    const studentNameValue = watch('studentInfo.name');
+    const visitDateValue = watch('visitInfo.visitDate');
+
+    // Auto-generate WhatsApp Group Name
+    useEffect(() => {
+        if (waGroupValue && studentNameValue && visitDateValue) {
+            try {
+                const date = new Date(visitDateValue);
+                if (isNaN(date.getTime())) return;
+                
+                const d = date.getDate();
+                const m = date.getMonth() + 1;
+                const y = date.getFullYear();
+                const cleanName = studentNameValue.replace(/\s+/g, '').toLowerCase();
+                const groupName = `${d}${m}${y}-${cleanName}`;
+                
+                setValue('checklist.waGroupName', groupName);
+                if (!disabledFields['checklist.waGroupName']) {
+                    setDisabledFields(prev => ({ ...prev, 'checklist.waGroupName': true }));
+                }
+            } catch (err) {
+                console.error('Error generating WA group name:', err);
+            }
+        } else if (!waGroupValue) {
+            setValue('checklist.waGroupName', '');
+        }
+    }, [waGroupValue, studentNameValue, visitDateValue, setValue]);
+
+    useEffect(() => {
+        const loadForm = async () => {
+            try {
+                if (!user) return;
+                setLoadingConfig(true);
+
+                let formType = urlFormType;
+                let visitData = null;
+
+                // 1. If editing, fetch visit first to get its REAL formType
+                if (id) {
+                    const vRes = await api.get(`/visits/${id}`);
+                    visitData = vRes.data.data;
+                    formType = visitData.formType;
+                    setVisitId(id);
+                }
+
+                // 2. Fallback for new visits
+                if (!formType) {
+                    formType = (user.department === 'B2C' || user.role === 'home_visit') ? 'home_visit' : 'generic';
+                }
+
+                // 3. Fetch config for the derived formType
+                const cRes = await api.get(`/form-config?formType=${formType}`);
+                if (cRes.data?.success && cRes.data.data) {
+                    setConfig(cRes.data.data);
+                }
+
+                // 4. Populate form if visitData exists
+                if (visitData) {
+                    if (visitData.meta?.meetingStart) visitData.meta.meetingStart = new Date(visitData.meta.meetingStart).toISOString().slice(0, 16);
+                    if (visitData.meta?.meetingEnd) visitData.meta.meetingEnd = new Date(visitData.meta.meetingEnd).toISOString().slice(0, 16);
+                    if (visitData.gpsLocation) setGpsLocation(visitData.gpsLocation);
+                    if (visitData.gpsCoordinates?.lat) setGpsCoords({ lat: visitData.gpsCoordinates.lat, lng: visitData.gpsCoordinates.lng });
+                    reset(visitData);
+                }
+            } catch (err) {
+                console.error('Error loading form:', err);
+            } finally {
+                setLoadingConfig(false);
+            }
+        };
+
+        if (user) loadForm();
+    }, [user, id, urlFormType, reset]);
+
+
     useEffect(() => {
         if (isSaving || loadingConfig) return;
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -203,15 +264,20 @@ const NewVisit = () => {
 
     const saveDraft = async () => {
         const identifier = formData.meta?.companyName || formData.studentInfo?.name;
-        const identifierLabel = formData.studentInfo?.name ? 'Student Name' : 'Company Name';
-
         if (!identifier) {
-            setSaveStatus(`Draft needs ${identifierLabel} to save`);
+            setSaveStatus('Draft needs Company/Student name to save');
             return;
         }
         setSaveStatus('Saving draft...');
         try {
-            const payload = { ...formData, exactLocation, lat: coords.lat, lon: coords.lon, status: 'draft', formVersion: config?.version, formType: config?.formType };
+            const payload = {
+                ...formData,
+                gpsLocation,
+                gpsCoordinates: gpsCoords,
+                status: 'draft',
+                formVersion: config?.version,
+                formType: config?.formType
+            };
             if (visitId) {
                 await api.put(`/visits/${visitId}`, payload);
             } else {
@@ -219,7 +285,7 @@ const NewVisit = () => {
                 setVisitId(res.data.data._id);
             }
             setSaveStatus(`Saved at ${new Date().toLocaleTimeString()}`);
-        } catch (err) {
+        } catch {
             setSaveStatus('Draft save failed');
         }
     };
@@ -227,7 +293,14 @@ const NewVisit = () => {
     const onSubmit = async (data) => {
         setIsSaving(true);
         try {
-            const payload = { ...data, exactLocation, lat: coords.lat, lon: coords.lon, status: 'submitted', formVersion: config?.version, formType: config?.formType };
+            const payload = {
+                ...data,
+                gpsLocation,
+                gpsCoordinates: gpsCoords,
+                status: 'submitted',
+                formVersion: config?.version,
+                formType: config?.formType
+            };
             if (visitId) {
                 await api.put(`/visits/${visitId}`, payload);
             } else {
@@ -236,7 +309,7 @@ const NewVisit = () => {
             setSaveStatus('Submitted successfully!');
             setTimeout(() => navigate('/'), 1500);
         } catch (err) {
-            alert('Error submitting survey: ' + (err.response?.data?.message || err.message));
+            alert('Error submitting: ' + (err.response?.data?.message || err.message));
         } finally {
             setIsSaving(false);
         }
@@ -250,7 +323,6 @@ const NewVisit = () => {
     const nextStep = async () => {
         const currentGroup = groups[currentStep];
         const stepFieldIds = config.fields.filter(f => f.group === currentGroup).map(f => f.id);
-        
         const isStepValid = await trigger(stepFieldIds);
         if (isStepValid) {
             setCurrentStep(prev => Math.min(prev + 1, groups.length - 1));
@@ -264,129 +336,229 @@ const NewVisit = () => {
     };
 
     if (loadingConfig) return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] text-slate-500">
-            <Loader2 className="w-10 h-10 animate-spin text-kanan-blue mb-4" />
-            <p className="font-bold">Syncing form configuration...</p>
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+            <div className="w-16 h-16 rounded-2xl bg-brand-blue/10 flex items-center justify-center mb-4">
+                <Loader2 className="w-8 h-8 animate-spin text-brand-blue" />
+            </div>
+            <p className="font-bold text-slate-700">Syncing form configuration...</p>
+            <p className="text-sm text-slate-400 mt-1">This will only take a moment</p>
         </div>
     );
 
     if (!config) return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] text-slate-500 bg-white rounded-3xl border border-dashed border-slate-200">
-            <Info className="w-12 h-12 text-slate-300 mb-4" />
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Form Not Found</h3>
-            <p className="max-w-md text-center">There is no active form configuration for your role. Please contact a SuperAdmin to publish a form.</p>
-            <button onClick={() => navigate('/')} className="mt-6 btn-primary px-8">Return to Dashboard</button>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
+            <div className="w-20 h-20 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                <Info className="w-10 h-10 text-slate-300" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Form Not Available</h3>
+            <p className="text-slate-500 max-w-md">No active form configuration found for your role. Contact a SuperAdmin to publish a form.</p>
+            <button onClick={() => navigate('/')} className="btn-primary mt-6 px-8">Return to Dashboard</button>
         </div>
     );
 
+    const isHomeVisit = config?.formType === 'home_visit' || urlFormType === 'home_visit';
+
     return (
-        <div className="pb-32">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4 px-2">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">
-                        {id ? 'Edit ' : 'New '} 
-                        {(config?.formType === 'home_visit' || urlFormType === 'home_visit') ? 'Home Visit Report' : 'Visit Report'}
-                    </h1>
-                    <div className="flex flex-wrap items-center gap-3 mt-2">
-                        <div className="flex items-center gap-1.5 text-slate-500 text-xs sm:text-sm bg-slate-100 px-2 py-1 rounded-md">
-                            <Clock className="w-3.5 h-3.5 text-kanan-blue" />
-                            <span>{saveStatus}</span>
-                        </div>
-                        
-                        <div className="flex items-center gap-1.5 text-xs sm:text-sm bg-kanan-blue/5 text-kanan-navy px-3 py-1 rounded-md border border-kanan-blue/10 max-w-md">
-                            <MapPin className="w-3.5 h-3.5 shrink-0 text-kanan-blue" />
-                            {fetchingLocation ? (
-                                <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin text-kanan-blue"/> Identifying location...</span>
-                            ) : exactLocation ? (
-                                <span className="truncate font-medium text-kanan-navy" title={exactLocation}>{exactLocation}</span>
-                            ) : locationError ? (
-                                <span className="text-red-500 flex items-center gap-2">{locationError} <button type="button" onClick={fetchExactLocation} className="underline font-medium text-red-600">Retry</button></span>
-                            ) : (
-                                <span>Location pending</span>
-                            )}
-                        </div>
+        <div className="pb-32 page-enter">
+            {/* Header */}
+            <div className="flex flex-col gap-4 mb-8">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+                            {id ? 'Edit' : 'New'} {isHomeVisit ? 'Home Visit' : 'Visit'}
+                        </h1>
+                        <p className="text-sm text-slate-500 mt-1 font-medium">Complete the field report below</p>
+                    </div>
+
+                    <button
+                        onClick={saveDraft}
+                        className="btn-outline shrink-0 flex items-center justify-center gap-2 py-2.5 sm:py-2 px-6 shadow-sm hover:shadow-md transition-all sm:w-auto w-full"
+                    >
+                        <Save className="w-4 h-4 text-brand-blue" />
+                        <span className="font-bold">Save Draft</span>
+                    </button>
+                </div>
+
+                {/* Status Badges Row */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Auto-save status */}
+                    <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600 bg-white shadow-sm border border-slate-100 px-3 py-2 rounded-xl">
+                        <div className="w-2 h-2 rounded-full bg-brand-sky animate-pulse" />
+                        {saveStatus}
+                    </div>
+
+                    {/* GPS Location */}
+                    <div className={`flex items-center gap-2 text-[11px] font-bold px-3 py-2 rounded-xl border transition-all ${
+                        gpsLocation ? 'bg-white text-brand-green border-brand-green/20 shadow-sm' :
+                        locationError ? 'bg-red-50 text-red-600 border-red-200 shadow-sm' :
+                        'bg-white text-slate-400 border-slate-100 shadow-sm'
+                    }`}>
+                        {fetchingLocation ? (
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin text-brand-sky" /> <span className="text-slate-500">Detecting location...</span></>
+                        ) : gpsLocation ? (
+                            <><MapPin className="w-3.5 h-3.5 text-brand-green shrink-0" /><span className="truncate max-w-[150px] sm:max-w-xs" title={gpsLocation}>{gpsLocation}</span></>
+                        ) : locationError ? (
+                            <><AlertCircle className="w-3.5 h-3.5" /> <span>{locationError}</span>
+                                <button type="button" onClick={fetchExactLocation} className="underline ml-1 font-bold text-brand-blue">Retry</button>
+                            </>
+                        ) : (
+                            <><MapPin className="w-3.5 h-3.5" /> <span>Location pending</span></>
+                        )}
                     </div>
                 </div>
-                <button
-                    onClick={saveDraft}
-                    className="flex items-center justify-center gap-2 text-kanan-blue font-semibold hover:bg-kanan-blue/5 px-4 py-2.5 rounded-xl border border-kanan-blue/10 bg-white transition-all shadow-sm"
-                >
-                    <Save className="w-5 h-5" />
-                    <span>Save Draft</span>
-                </button>
             </div>
 
+            {/* Step Indicator */}
             <StepIndicator currentStep={currentStep} steps={groups} />
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 max-w-4xl mx-auto px-2">
-                <div className="card shadow-xl border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-500 p-4 sm:p-6">
-                    <div className="space-y-6">
-                        <div className="border-b pb-4 mb-6">
-                            <h3 className="text-lg font-bold text-slate-800">{groups[currentStep]}</h3>
-                            <p className="text-sm text-slate-500">Please provide the necessary details for this section.</p>
+            {/* Form */}
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-4xl mx-auto">
+                <div className="card shadow-premium animate-fade-in">
+                    {/* Section Header */}
+                    <div className="flex items-center gap-4 mb-8 pb-6 border-b border-slate-100/60">
+                        <div className="w-11 h-11 rounded-2xl bg-brand-blue flex items-center justify-center text-white font-black text-lg shadow-lg shadow-brand-blue/20 shrink-0">
+                            {currentStep + 1}
                         </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {config.fields
-                                .filter(f => f.group === groups[currentStep])
-                                .map(field => (
-                                    <DynamicField 
-                                        key={field.id}
-                                        field={field}
-                                        register={register}
-                                        control={control}
-                                        errors={errors}
-                                        watch={watch}
-                                        setValue={setValue}
-                                        Controller={Controller}
-                                    />
-                                ))
-                            }
+                        <div>
+                            <h3 className="text-lg font-extrabold text-slate-900 tracking-tight leading-none mb-1">{groups[currentStep]}</h3>
+                            <p className="text-xs text-slate-500 font-medium tracking-tight">Required details for this visit step</p>
                         </div>
+                        <div className="ml-auto flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100/50">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Step</span>
+                            <span className="text-sm font-black text-brand-blue">{currentStep + 1}</span>
+                            <span className="text-sm font-bold text-slate-200">/</span>
+                            <span className="text-sm font-black text-slate-400">{groups.length}</span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {config.fields
+                            .filter(f => f.group === groups[currentStep])
+                            .map(field => {
+                                // 1. Render the main field
+                                const mainField = (
+                                    <React.Fragment key={`main_${field.id}`}>
+                                        <DynamicField
+                                            field={field}
+                                            register={register}
+                                            control={control}
+                                            errors={errors}
+                                            watch={watch}
+                                            setValue={setValue}
+                                            Controller={Controller}
+                                            disabled={disabledFields[field.id]}
+                                        />
+                                        {field.id === 'checklist.waGroup' && waGroupValue && (
+                                            <DynamicField
+                                                key="checklist.waGroupName"
+                                                field={{
+                                                    id: 'checklist.waGroupName',
+                                                    label: 'WhatsApp Group Name',
+                                                    type: 'text',
+                                                    required: false,
+                                                    placeholder: 'Generating...'
+                                                }}
+                                                register={register}
+                                                control={control}
+                                                errors={errors}
+                                                watch={watch}
+                                                setValue={setValue}
+                                                Controller={Controller}
+                                                disabled={true}
+                                                showCopy={true}
+                                            />
+                                        )}
+                                    </React.Fragment>
+                                );
+
+                                // 2. If it's the teamSize field, inject additional fields
+                                if (field.id === 'visitInfo.teamSize' && teamSize > 1) {
+                                    const extraFields = [];
+                                    for (let i = 1; i < teamSize; i++) {
+                                        extraFields.push(
+                                            <div key={`extra_officer_${i}`} className="space-y-1.5">
+                                                <label className="label">
+                                                    Team Member {i + 1} Name <span className="text-red-500 ml-0.5">*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    {...register(`visitInfo.teamMembers.${i - 1}`)}
+                                                    className={`input-field ${errors.visitInfo?.teamMembers?.[i - 1] ? 'border-red-400' : ''}`}
+                                                    placeholder={`Enter member ${i + 1} name...`}
+                                                />
+                                                {errors.visitInfo?.teamMembers?.[i - 1] && (
+                                                    <p className="text-xs text-red-500 font-medium mt-1">{errors.visitInfo.teamMembers[i - 1].message}</p>
+                                                )}
+                                            </div>
+                                        );
+                                    }
+                                    return (
+                                        <React.Fragment key={`group_${field.id}`}>
+                                            {mainField}
+                                            {extraFields}
+                                        </React.Fragment>
+                                    );
+                                }
+
+                                return (
+                                    <React.Fragment key={`node_${field.id}`}>
+                                        {mainField}
+                                    </React.Fragment>
+                                );
+                            })
+                        }
                     </div>
                 </div>
 
-                {/* Navigation Buttons */}
-                <div className="flex justify-between items-center bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-2xl fixed bottom-4 left-1/2 -translate-x-1/2 w-[92%] sm:w-[85%] lg:w-[calc(100%-340px)] max-w-4xl z-40">
-                    <button
-                        type="button"
-                        onClick={prevStep}
-                        disabled={currentStep === 0}
-                        className="flex items-center gap-2 px-6 py-3 font-bold text-slate-500 disabled:opacity-30 hover:bg-slate-50 rounded-xl transition-all"
-                    >
-                        <ChevronLeft className="w-5 h-5" />
-                        Prev
-                    </button>
- 
-                    <div className="text-sm font-bold text-slate-400">
-                        {currentStep + 1} / {groups.length}
-                    </div>
- 
-                    {currentStep === groups.length - 1 ? (
-                        <button
-                            type="submit"
-                            disabled={isSaving}
-                            className="btn-secondary h-12 px-10 flex items-center gap-2 shadow-lg shadow-kanan-blue/20"
-                        >
-                            {isSaving ? (
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                            ) : (
-                                <>
-                                    Submit Report
-                                    <CheckCircle className="w-5 h-5" />
-                                </>
-                            )}
-                        </button>
-                    ) : (
+                {/* Fixed Navigation Bar */}
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[94%] max-w-4xl z-40">
+                    <div className="glass shadow-premium p-3 sm:p-4 rounded-3xl flex justify-between items-center">
                         <button
                             type="button"
-                            onClick={nextStep}
-                            className="btn-primary h-12 px-10 flex items-center gap-2 shadow-lg shadow-kanan-navy/20"
+                            onClick={prevStep}
+                            disabled={currentStep === 0}
+                            className="flex items-center gap-2 px-5 py-2.5 font-bold text-slate-500 disabled:opacity-20 hover:bg-white/50 rounded-2xl transition-all"
                         >
-                            Next Step
-                            <ChevronRight className="w-5 h-5" />
+                            <ChevronLeft className="w-5 h-5" />
+                            <span className="hidden sm:inline">Previous</span>
                         </button>
-                    )}
+
+                        <div className="flex items-center gap-2">
+                            {groups.map((_, i) => (
+                                <div
+                                    key={i}
+                                    className={`rounded-full transition-all duration-500 ${
+                                        i === currentStep ? 'w-8 h-2 bg-brand-blue' :
+                                        i < currentStep ? 'w-2 h-2 bg-brand-green shadow-sm shadow-brand-green/30' :
+                                        'w-2 h-2 bg-slate-200'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+
+                        {currentStep === groups.length - 1 ? (
+                            <button
+                                type="submit"
+                                disabled={isSaving}
+                                className="flex items-center gap-2 px-8 py-3 bg-brand-green text-white font-bold rounded-2xl hover:bg-brand-green/90 disabled:opacity-60 transition-all shadow-xl shadow-brand-green/25"
+                            >
+                                {isSaving ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <><CheckCircle className="w-5 h-5" /> Submit</>
+                                )}
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={nextStep}
+                                className="flex items-center gap-2 px-8 py-3 bg-brand-blue text-white font-bold rounded-2xl hover:bg-brand-navy transition-all shadow-xl shadow-brand-blue/25"
+                            >
+                                <span>Next</span>
+                                <ChevronRight className="w-5 h-5" />
+                            </button>
+                        )}
+                    </div>
                 </div>
             </form>
         </div>

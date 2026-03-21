@@ -1,50 +1,48 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { X, Check } from 'lucide-react';
 
-const MultiSelect = ({ options, value = [], onChange, label, placeholder }) => {
-    const toggleOption = (option) => {
-        const newValue = value.includes(option)
-            ? value.filter((v) => v !== option)
-            : [...value, option];
-        onChange(newValue);
+const MultiSelect = ({ options = [], value = [], onChange, placeholder }) => {
+    const toggle = (option) => {
+        onChange(value.includes(option) ? value.filter(v => v !== option) : [...value, option]);
     };
 
     return (
-        <div className="w-full">
-            {label && <label className="block text-sm font-semibold text-slate-700 mb-2">{label}</label>}
-            <div className="min-h-[42px] p-1 border border-slate-300 rounded-md bg-white flex flex-wrap gap-2 items-center">
+        <div className="w-full space-y-3">
+            {/* Selected chips */}
+            <div className="min-h-[44px] p-2 border border-slate-200 rounded-xl bg-white flex flex-wrap gap-1.5 items-center focus-within:ring-2 focus-within:ring-brand-sky/30 focus-within:border-brand-sky transition-all">
                 {value.length === 0 && (
-                    <span className="text-slate-400 text-sm ml-2">{placeholder || 'Select options...'}</span>
+                    <span className="text-slate-400 text-sm ml-1">{placeholder || 'Select options...'}</span>
                 )}
-                {value.map((val) => (
-                    <span
-                        key={val}
-                        className="bg-kanan-blue/10 text-kanan-blue text-xs font-bold px-2 py-1 rounded flex items-center gap-1 border border-kanan-blue/20"
-                    >
+                {value.map(val => (
+                    <span key={val} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-blue/10 text-brand-blue text-xs font-semibold border border-brand-blue/20">
                         {val}
                         <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); toggleOption(val); }}
-                            className="hover:text-red-500"
+                            onClick={() => toggle(val)}
+                            className="ml-0.5 hover:text-red-500 transition-colors"
                         >
                             <X className="w-3 h-3" />
                         </button>
                     </span>
                 ))}
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-                {options.map((option) => {
-                    const isSelected = value.includes(option);
+
+            {/* Option pills */}
+            <div className="flex flex-wrap gap-2">
+                {options.map(option => {
+                    const selected = value.includes(option);
                     return (
                         <button
                             key={option}
                             type="button"
-                            onClick={() => toggleOption(option)}
-                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${isSelected
-                                    ? 'bg-kanan-navy border-kanan-navy text-white'
-                                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                                }`}
+                            onClick={() => toggle(option)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all active:scale-95 ${
+                                selected
+                                    ? 'bg-brand-blue text-white border-brand-blue shadow-sm shadow-brand-blue/20'
+                                    : 'bg-white text-slate-600 border-slate-200 hover:border-brand-sky hover:text-brand-sky'
+                            }`}
                         >
+                            {selected && <Check className="w-3 h-3" />}
                             {option}
                         </button>
                     );

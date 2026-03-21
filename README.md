@@ -29,8 +29,10 @@ A production-ready MERN stack application for managing field agent visit surveys
 | Internal Title | Email | Password |
 | :--- | :--- | :--- |
 | **Super Admin** | superadmin@kanan.co | Admin@123 |
-| **Admin** | admin@kanan.co | Admin@123 |
-| **User (RM)** | rahul@kanan.co | Rahul@123 |
+| **Admin (B2C)** | adminb2c@kanan.co | Admin@123 |
+| **Admin (B2B)** | adminb2b@kanan.co | Admin@123 |
+| **User (B2C)** | b2c@kanan.co | Admin@123 |
+| **User (B2B)** | b2b@kanan.co | Admin@123 |
 
 ## Features Implemented
 - **Role-based Access Control**: User, Admin, and SuperAdmin tiers.

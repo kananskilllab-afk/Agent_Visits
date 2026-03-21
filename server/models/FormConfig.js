@@ -1,5 +1,23 @@
 const mongoose = require('mongoose');
 
+const fieldSchema = new mongoose.Schema({
+    id:    { type: String, required: true },
+    group: { type: String, required: true },
+    label: { type: String, required: true },
+    type: {
+        type: String,
+        enum: ['text', 'textarea', 'number', 'date', 'datetime', 'dropdown', 'multi-select', 'toggle', 'star-rating', 'file', 'photo-upload'],
+        required: true
+    },
+    required:    { type: Boolean, default: false },
+    options:     [{ type: String }],
+    placeholder: { type: String },
+    conditionalOn: {
+        fieldId: String,
+        value:   mongoose.Schema.Types.Mixed
+    }
+}, { _id: false });
+
 const formConfigSchema = new mongoose.Schema({
     version: {
         type: String,
@@ -15,24 +33,8 @@ const formConfigSchema = new mongoose.Schema({
         enum: ['generic', 'home_visit'],
         default: 'generic'
     },
-    fields: [{
-        id: String,
-        group: String,
-        label: String,
-        type: {
-            type: String,
-            enum: ['text', 'textarea', 'number', 'date', 'datetime', 'dropdown', 'multi-select', 'toggle', 'star-rating', 'file']
-        },
-        required: {
-            type: Boolean,
-            default: false
-        },
-        options: [String],
-        conditionalOn: {
-            fieldId: String,
-            value: mongoose.Schema.Types.Mixed
-        }
-    }],
+    description: { type: String },
+    fields: [fieldSchema],
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
@@ -40,5 +42,7 @@ const formConfigSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+formConfigSchema.index({ formType: 1, isActive: 1 });
 
 module.exports = mongoose.model('FormConfig', formConfigSchema);

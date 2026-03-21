@@ -1,19 +1,19 @@
 import React from 'react';
 
+const STATUS_CFG = {
+    draft:           { label: 'Draft',           bg: 'bg-slate-100',         text: 'text-slate-600',      dot: 'bg-slate-400',     ring: 'ring-slate-200'       },
+    submitted:       { label: 'Pending Review',  bg: 'bg-orange-50',         text: 'text-brand-orange',   dot: 'bg-brand-orange',  ring: 'ring-brand-orange/20' },
+    reviewed:        { label: 'Reviewed',        bg: 'bg-blue-50',           text: 'text-brand-sky',      dot: 'bg-brand-sky',     ring: 'ring-brand-sky/20'    },
+    action_required: { label: 'Action Required', bg: 'bg-red-50',            text: 'text-red-600',        dot: 'bg-red-500',       ring: 'ring-red-400/20'      },
+    closed:          { label: 'Closed',          bg: 'bg-green-50',          text: 'text-brand-green',    dot: 'bg-brand-green',   ring: 'ring-brand-green/20'  },
+};
+
 const StatusBadge = ({ status }) => {
-    const config = {
-        draft: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'Draft' },
-        submitted: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Pending Review' },
-        reviewed: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Reviewed' },
-        action_required: { bg: 'bg-red-100', text: 'text-red-700', label: 'Action Required' },
-        closed: { bg: 'bg-green-100', text: 'text-green-700', label: 'Closed' }
-    };
-
-    const { bg, text, label } = config[status] || config.draft;
-
+    const cfg = STATUS_CFG[status] || STATUS_CFG.draft;
     return (
-        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border border-current bg-opacity-10 ${bg} ${text}`}>
-            {label}
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ring-1 ${cfg.bg} ${cfg.text} ${cfg.ring}`}>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cfg.dot}`} />
+            {cfg.label}
         </span>
     );
 };

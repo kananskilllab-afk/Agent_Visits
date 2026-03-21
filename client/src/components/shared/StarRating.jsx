@@ -1,34 +1,39 @@
 import React, { useState } from 'react';
 import { Star } from 'lucide-react';
 
-const StarRating = ({ value = 0, onChange, max = 5, label }) => {
+const StarRating = ({ value = 0, onChange, max = 5 }) => {
     const [hover, setHover] = useState(null);
+    const active = hover ?? value;
 
     return (
-        <div>
-            {label && <label className="block text-sm font-semibold text-slate-700 mb-2">{label}</label>}
-            <div className="flex gap-2">
-                {[...Array(max)].map((_, index) => {
-                    const ratingValue = index + 1;
-                    const isFilled = ratingValue <= (hover || value);
-
-                    return (
-                        <button
-                            key={index}
-                            type="button"
-                            className="focus:outline-none transition-transform hover:scale-110"
-                            onClick={() => onChange(ratingValue)}
-                            onMouseEnter={() => setHover(ratingValue)}
-                            onMouseLeave={() => setHover(null)}
-                        >
-                            <Star
-                                className={`w-8 h-8 ${isFilled ? 'fill-yellow-400 text-yellow-400' : 'text-slate-200'
-                                    }`}
-                            />
-                        </button>
-                    );
-                })}
-            </div>
+        <div className="flex items-center gap-1.5">
+            {Array.from({ length: max }, (_, i) => {
+                const rating = i + 1;
+                const filled = rating <= active;
+                return (
+                    <button
+                        key={i}
+                        type="button"
+                        onClick={() => onChange(rating)}
+                        onMouseEnter={() => setHover(rating)}
+                        onMouseLeave={() => setHover(null)}
+                        className="focus:outline-none transition-all hover:scale-110 active:scale-95"
+                        title={`Rate ${rating} out of ${max}`}
+                    >
+                        <Star
+                            className="w-8 h-8 transition-colors"
+                            style={{
+                                fill:   filled ? '#E19D19' : 'transparent',
+                                color:  filled ? '#E19D19' : '#CBD5E1',
+                                filter: filled ? 'drop-shadow(0 1px 2px rgba(225,157,25,0.3))' : 'none',
+                            }}
+                        />
+                    </button>
+                );
+            })}
+            {value > 0 && (
+                <span className="ml-1 text-sm font-bold text-brand-gold">{value}/{max}</span>
+            )}
         </div>
     );
 };

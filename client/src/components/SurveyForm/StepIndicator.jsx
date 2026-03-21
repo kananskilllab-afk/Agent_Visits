@@ -1,68 +1,78 @@
 import React from 'react';
 import { Check } from 'lucide-react';
 
-const defaultSteps = [
-    'Meta', 'Profile', 'Team', 'Ops', 'Enquiry', 'Partnership', 'Challenges', 'Support', 'Summary'
-];
-
-const StepIndicator = ({ currentStep, steps = defaultSteps }) => {
-    const scrollContainerRef = React.useRef(null);
+const StepIndicator = ({ currentStep, steps = [] }) => {
+    const scrollRef = React.useRef(null);
 
     React.useEffect(() => {
-        if (scrollContainerRef.current) {
-            const activeElement = scrollContainerRef.current.children[currentStep];
-            if (activeElement) {
-                const containerWidth = scrollContainerRef.current.offsetWidth;
-                const elementOffset = activeElement.offsetLeft;
-                const elementWidth = activeElement.offsetWidth;
-                
-                scrollContainerRef.current.scrollTo({
-                    left: elementOffset - (containerWidth / 2) + (elementWidth / 2),
-                    behavior: 'smooth'
-                });
-            }
+        if (!scrollRef.current) return;
+        const active = scrollRef.current.children[currentStep];
+        if (active) {
+            scrollRef.current.scrollTo({
+                left: active.offsetLeft - scrollRef.current.offsetWidth / 2 + active.offsetWidth / 2,
+                behavior: 'smooth'
+            });
         }
     }, [currentStep]);
 
     return (
-        <div className="mb-8 w-full">
-            <div 
-                ref={scrollContainerRef}
-                className="flex items-start overflow-x-auto pb-6 no-scrollbar snap-x touch-pan-x px-4"
-            >
+        <div className="mb-6 sm:mb-10">
+            {/* Header for Mobile - Simplified current step info */}
+            <div className="flex items-center justify-between mb-4 md:hidden px-1">
+                <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Current Progress</span>
+                    <h3 className="text-sm font-extrabold text-brand-blue truncate max-w-[200px]">
+                        {steps[currentStep]}
+                    </h3>
+                </div>
+                <div className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">
+                    {currentStep + 1} / {steps.length}
+                </div>
+            </div>
+
+            {/* Progress bar */}
+            <div className="relative h-1.5 bg-slate-100 rounded-full mb-6 mx-1 overflow-hidden">
+                <div
+                    className="absolute left-0 top-0 h-full rounded-full transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
+                    style={{
+                        width: steps.length > 1 ? `${(currentStep / (steps.length - 1)) * 100}%` : '0%',
+                        background: 'linear-gradient(90deg, #284695 0%, #00A0E3 100%)'
+                    }}
+                />
+            </div>
+
+            {/* Steps */}
+            <div ref={scrollRef} className="flex items-start overflow-x-auto no-scrollbar snap-x px-1 gap-1 pb-2">
                 {steps.map((label, index) => {
-                    const isCompleted = index < currentStep;
-                    const isActive = index === currentStep;
+                    const done   = index < currentStep;
+                    const active = index === currentStep;
 
                     return (
-                        <div 
-                            key={label} 
-                            className="flex flex-col items-center flex-none w-24 relative snap-center"
-                        >
-                            {/* Connector Line */}
-                            {index !== 0 && (
-                                <div
-                                    className={`absolute h-0.5 w-full top-5 -left-1/2 z-0 ${
-                                        isCompleted ? 'bg-kanan-blue' : 'bg-slate-100'
-                                    }`}
-                                />
-                            )}
-
-                            <div
-                                className={`w-10 h-10 rounded-full flex items-center justify-center z-10 transition-all duration-300 relative shadow-sm ${
-                                    isCompleted ? 'bg-kanan-blue text-white' :
-                                    isActive ? 'bg-kanan-navy text-white ring-4 ring-kanan-navy/10' :
-                                    'bg-white border-2 border-slate-100 text-slate-400'
-                                }`}
-                            >
-                                {isCompleted ? <Check className="w-5 h-5" /> : index + 1}
+                        <div key={label} className="flex flex-col items-center flex-none w-20 sm:w-24 snap-center relative group">
+                            {/* Circle */}
+                            <div className={`
+                                w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-sm font-bold z-10
+                                transition-all duration-300 shadow-sm
+                                ${done   ? 'bg-brand-green text-white shadow-lg shadow-brand-green/20 rotate-0' : ''}
+                                ${active ? 'bg-brand-blue text-white ring-4 ring-brand-blue/10 scale-105 shadow-lg shadow-brand-blue/20' : ''}
+                                ${!done && !active ? 'bg-white border-2 border-slate-100 text-slate-300' : ''}
+                            `}>
+                                {done ? <Check className="w-4 h-4" /> : index + 1}
                             </div>
 
-                            <span className={`mt-3 text-[10px] font-bold uppercase tracking-wider text-center px-1 break-words transition-colors ${
-                                isActive ? 'text-kanan-navy' : 'text-slate-400'
+                            {/* Label */}
+                            <span className={`mt-3 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-center leading-tight px-1 transition-all duration-300 ${
+                                active ? 'text-brand-blue opacity-100 transform translate-y-0' : 
+                                done ? 'text-brand-green opacity-70' : 
+                                'text-slate-400 opacity-40 scale-95'
                             }`}>
                                 {label}
                             </span>
+
+                            {/* Connector line (hidden on last) */}
+                            {index < steps.length - 1 && (
+                                <div className={`absolute top-4.5 -right-0.5 w-1 h-[2px] hidden sm:block ${done ? 'bg-brand-green' : 'bg-slate-100'}`} />
+                            )}
                         </div>
                     );
                 })}
