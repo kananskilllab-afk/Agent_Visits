@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 const cloudinary = require('cloudinary').v2;
 
 /**
@@ -51,7 +52,7 @@ exports.uploadPhoto = async (req, res) => {
         }
 
         const ext = path.extname(req.file.originalname) || '.jpg';
-        const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+        const filename = `${uuidv4()}${ext}`;
         const filePath = path.join(uploadsDir, filename);
 
         await fs.promises.writeFile(filePath, req.file.buffer);

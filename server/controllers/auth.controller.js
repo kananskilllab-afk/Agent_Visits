@@ -16,14 +16,12 @@ const generateToken = (res, userId) => {
 
 exports.login = async (req, res) => {
     const { email, password } = req.body;
-    console.log(`[AUTH] Login attempt for: ${email}`);
 
     try {
         const user = await User.findOne({ email });
 
         if (user && (await user.comparePassword(password))) {
             if (!user.isActive) {
-                console.warn(`[AUTH] Login blocked: User ${email} is inactive`);
                 return res.status(401).json({ success: false, message: 'Account is deactivated' });
             }
 
@@ -31,7 +29,6 @@ exports.login = async (req, res) => {
             await user.save();
 
             generateToken(res, user._id);
-            console.log(`[AUTH] Login successful: ${email}`);
 
             res.json({
                 success: true,
@@ -45,11 +42,9 @@ exports.login = async (req, res) => {
                 }
             });
         } else {
-            console.warn(`[AUTH] Login failed: Invalid credentials for ${email}`);
             res.status(401).json({ success: false, message: 'Invalid email or password' });
         }
     } catch (error) {
-        console.error(`[AUTH] CRITICAL ERROR during login for ${email}:`, error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
