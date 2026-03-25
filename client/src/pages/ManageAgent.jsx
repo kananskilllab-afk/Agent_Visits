@@ -395,6 +395,8 @@ const ManageAgent = () => {
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Contact</th>
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Region/Location</th>
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">BDM/RM</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Visits</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Last Visit</th>
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Actions</th>
                             </tr>
                         </thead>
@@ -477,6 +479,21 @@ const ManageAgent = () => {
                                                 <p className="text-xs font-medium text-slate-500">{agent.rmName || '—'}</p>
                                             </div>
                                         </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                        <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-sky/10 text-brand-sky font-bold text-xs ring-1 ring-brand-sky/20">
+                                            {agent.visitCount || 0}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        {agent.lastVisitDate ? (
+                                            <div className="flex flex-col gap-0.5">
+                                                <p className="text-xs font-bold text-slate-600">{new Date(agent.lastVisitDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                                                <p className="text-[10px] text-slate-400 font-medium">{new Date(agent.lastVisitDate).getFullYear()}</p>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-slate-300">—</span>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex items-center justify-center gap-2">
